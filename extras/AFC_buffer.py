@@ -96,7 +96,6 @@ class AFCtrigger:
 
     def enable_buffer(self):
         if self.turtleneck:
-            # self._set_extruder_stepper()
             self.enable = True
             multiplier = 1.0
             if self.last_state == ADVANCE_STATE_NAME:
@@ -143,7 +142,10 @@ class AFCtrigger:
 
     def reset_multiplier(self):
         if self.debug: self.gcode.respond_info("Buffer multiplier reset")
-        self.update_rotation_distance(1.0)
+
+        cur_stepper = self.printer.lookup_object('AFC_stepper ' + self.AFC.current)
+        cur_stepper.update_rotation_distance( 1 )
+        self.gcode.respond_info("Rotation distance reset : {}".format(cur_stepper.extruder_stepper.stepper.get_rotation_distance()[0]))
 
     def advance_callback(self, eventime, state):
         if self.printer.state_message == 'Printer is ready' and self.enable:
