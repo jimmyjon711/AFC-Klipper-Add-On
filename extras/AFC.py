@@ -679,7 +679,7 @@ class afc:
             CUR_LANE = self.printer.lookup_object('AFC_stepper ' + lane)
             self.TOOL_LOAD(CUR_LANE)
             # Restore state
-            self.gcode.run_script_from_command("RESTORE_GCODE_STATE NAME=_AFC_CHANGE_TOOL MOVE=1 MOVE_SPEED={}".format(self.tool_unload_speed))
+            self.gcode.run_script_from_command("RESTORE_GCODE_STATE NAME=_AFC_CHANGE_TOOL MOVE=1 MOVE_SPEED={}".format(60)) #self.tool_unload_speed))
             if self.is_printing() and self.is_paused():
                 self.failed_in_toolchange = True
 
@@ -688,7 +688,7 @@ class afc:
         if self.failed_in_toolchange:
             # Restore previous state
             self.failed_in_toolchange = False
-            self.gcode.run_script_from_command("RESTORE_GCODE_STATE NAME=_AFC_CHANGE_TOOL MOVE=1 MOVE_SPEED={}".format(self.tool_unload_speed))
+            self.gcode.run_script_from_command("RESTORE_GCODE_STATE NAME=_AFC_CHANGE_TOOL MOVE=1 MOVE_SPEED={}".format(60))#self.tool_unload_speed))
 
     def get_status(self, eventtime):
         str = {}
