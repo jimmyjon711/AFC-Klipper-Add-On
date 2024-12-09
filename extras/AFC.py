@@ -875,7 +875,7 @@ class afc:
             None
         """
         if not self.is_homed():
-            self.ERROR.AFC_error("Please home printer before doing a toolchange")
+            self.ERROR.AFC_error("Please home printer before doing a toolchange", False)
             return
 
         cmd = gcmd.get_commandline()
