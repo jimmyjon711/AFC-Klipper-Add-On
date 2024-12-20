@@ -115,6 +115,15 @@ class AFCExtruderStepper:
         if self.afc_motor_enb is not None:
             self.afc_motor_enb = AFC_assist.AFCassistMotor(config, 'enb')
 
+        self.global_tmc_print_current = config.getsection("AFC").getfloat("global_print_current", 0.6)
+        self.tmc_print_current = config.getfloat("print_current", self.global_tmc_print_current)
+        try:
+            self.tmc_driver = next(config.getsection(s) for s in config.fileconfig.sections() if 'tmc' in s and config.get_name() in s)
+        except:
+            raise self.gcode.error("Count not find TMC for stepper {}".format(self.name))
+        
+        self.tmc_load_current = self.tmc_driver.getfloat('run_current')
+
         self.filament_diameter = config.getfloat("filament_diameter", 1.75)
         self.filament_density = config.getfloat("filament_density", 1.24)
         self.inner_diameter = config.getfloat("spool_inner_diameter", 100)  # Inner diameter in mm
@@ -135,6 +144,8 @@ class AFCExtruderStepper:
 
         # Get and save base rotation dist
         self.base_rotation_dist = self.extruder_stepper.stepper.get_rotation_distance()[0]
+
+        self.AFC.gcode.register_mux_command("SET_CURRENT_LANE", "LANE", self.name, self.cmd_SET_CURRENT_LANE)
 
     def assist(self, value, is_resend=False):
         if self.afc_motor_rwd is None:
@@ -239,7 +250,7 @@ class AFCExtruderStepper:
                     self.reactor.pause(self.reactor.monotonic() + 0.1)
                     if x> 40:
                         msg = (' FAILED TO LOAD, CHECK FILAMENT AT TRIGGER\n||==>--||----||------||\nTRG   LOAD   HUB    TOOL')
-                        self.AFC.AFC_error(msg, False)
+                        self.AFC.ERROR.AFC_error(msg, False)
                         self.AFC.afc_led(self.AFC.led_fault, led)
                         self.status=''
                         break
@@ -257,6 +268,10 @@ class AFCExtruderStepper:
                     empty_LANE = self.AFC.stepper(self.AFC.current)
                     change_LANE = self.AFC.stepper(self.runout_lane)
                     self.gcode.run_script_from_command(change_LANE.map)
+
+                    self.AFC.ERROR.pause_print()
+                    self.gcode.run_script_from_command(change_LANE.map) # Would need to check error state before moving fowards
+                    self.AFC.ERROR.resume_print() #Function would need to be created
                     self.gcode.run_script_from_command('SET_MAP LANE=' + change_LANE.name + ' MAP=' + empty_LANE.map)
                 else:
                     # Pause print
@@ -264,6 +279,7 @@ class AFCExtruderStepper:
                     self.AFC.ERROR.pause_print()
             else:
                 self.status = None
+                self.hub_load = False
                 self.AFC.afc_led(self.AFC.led_not_ready, led)
 
     def do_enable(self, enable):
@@ -284,6 +300,15 @@ class AFCExtruderStepper:
             toolhead.dwell(self.next_cmd_time - print_time)
         else:
             self.next_cmd_time = print_time
+
+    def _set_current(self, current):
+        self.gcode.run_script_from_command("SET_TMC_CURRENT STEPPER='{}' CURRENT={}".format(self.name, current))
+
+    def set_load_current(self):
+        self._set_current( self.tmc_load_current )
+
+    def set_print_current(self):
+        self._set_current( self.tmc_print_current )
 
     def update_rotation_distance(self, multiplier):
         self.extruder_stepper.stepper.set_rotation_distance( self.base_rotation_dist / multiplier )
@@ -344,6 +369,13 @@ class AFCExtruderStepper:
 
         if self.remaining_weight < self.empty_spool_weight:
             self.remaining_weight = self.empty_spool_weight  # Ensure weight doesn't drop below empty spool weight
+    
+    def cmd_SET_CURRENT_LANE(self, gcmd):
+        # lane = gcmd.get('LANE', None)
+        self.AFC.gcode.respond_info("Name : {}".format(self.name))
+        # CUR_LANE = self.printer.lookup_object('AFC_stepper ' + lane)
+        # CUR_EXTRUDER = self.printer.lookup_object('AFC_extruder ' + CUR_LANE.extruder_name)
+        # self.AFC._set_current_lane_active(CUR_LANE, CUR_EXTRUDER)
 
 def load_config_prefix(config):
     return AFCExtruderStepper(config)

@@ -81,6 +81,7 @@ class afcPrep:
                 if LANE.name not in self.AFC.lanes[LANE.unit]: self.AFC.lanes[LANE.unit][LANE.name] = {}
                 if 'spool_id' in self.AFC.lanes[LANE.unit][LANE.name]: LANE.spool_id = self.AFC.lanes[LANE.unit][LANE.name]['spool_id'] 
                 if self.AFC.spoolman_ip !=None and LANE.spool_id != None:
+                    # make this call the common spool stuff
                     try:
                         url = 'http://' + self.AFC.spoolman_ip + ':'+ self.AFC.spoolman_port +"/api/v1/spool/" + self.AFC.lanes[LANE.unit][LANE.name]['spool_id']
                         result = json.load(urlopen(url))
@@ -113,7 +114,7 @@ class afcPrep:
                 try: CUR_HUB = self.printer.lookup_object('AFC_hub '+ UNIT)
                 except:
                     error_string = 'Error: Hub for ' + UNIT + ' not found in AFC_Hardware.cfg. Please add the [AFC_Hub ' + UNIT + '] config section.'
-                    self.AFC.AFC_error(error_string, False)
+                    self.AFC.ERROR.AFC_error(error_string, False)
                     return
                 self.AFC.gcode.respond_info(CUR_HUB.type + ' ' + UNIT +' Prepping lanes')
 

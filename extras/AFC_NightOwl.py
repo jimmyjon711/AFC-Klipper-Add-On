@@ -31,14 +31,14 @@ class afcNightOwl:
         try: CUR_EXTRUDER = self.printer.lookup_object('AFC_extruder ' + CUR_LANE.extruder_name)
         except:
             error_string = 'Error: No config found for extruder: ' + CUR_LANE.extruder_name + ' in [AFC_stepper ' + CUR_LANE.name + ']. Please make sure [AFC_extruder ' + CUR_LANE.extruder_name + '] config exists in AFC_Hardware.cfg'
-            self.AFC.AFC_error(error_string, False)
+            self.AFC.ERROR.AFC_error(error_string, False)
             return False
 
         # Run test reverse/forward on each lane
         CUR_LANE.extruder_stepper.sync_to_extruder(None)
-        CUR_LANE.move( 5, self.AFC.short_moves_speed, self.AFC.short_moves_accel, True)
-        self.AFC.reactor.pause(self.AFC.reactor.monotonic() + delay)
-        CUR_LANE.move( -5, self.AFC.short_moves_speed, self.AFC.short_moves_accel, True)
+        # CUR_LANE.move( 5, self.AFC.short_moves_speed, self.AFC.short_moves_accel, True)
+        # self.AFC.reactor.pause(self.AFC.reactor.monotonic() + delay)
+        # CUR_LANE.move( -5, self.AFC.short_moves_speed, self.AFC.short_moves_accel, True)
 
         if CUR_LANE.prep_state == False:
             if CUR_LANE.load_state == False:

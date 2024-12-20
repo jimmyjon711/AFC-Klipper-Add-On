@@ -98,6 +98,9 @@ class afc:
 
         self.VarFile = config.get('VarFile')
 
+        # spc = config.getsection("spoolman")
+        # self.gcode.respond_info('Spoolman server {}'.format(spc.get_name()))
+
         # Get debug and cast to boolean
         #self.debug = True == config.get('debug', 0)
         self.debug = False
@@ -141,6 +144,7 @@ class afc:
         self.gcode.register_command('HUB_CUT_TEST', self.cmd_HUB_CUT_TEST, desc=self.cmd_HUB_CUT_TEST_help)
         self.gcode.register_mux_command('SET_BOWDEN_LENGTH', 'AFC', None, self.cmd_SET_BOWDEN_LENGTH, desc=self.cmd_SET_BOWDEN_LENGTH_help)
         self.gcode.register_command('AFC_STATUS', self.cmd_AFC_STATUS, desc=self.cmd_AFC_STATUS_help)
+                
 
     cmd_AFC_STATUS_help = "Return current status of AFC"
     def cmd_AFC_STATUS(self, gcmd):
@@ -283,7 +287,11 @@ class afc:
                 self.AFC.gcode.respond_info(lane + ' Unknown')
                 return
         CUR_LANE = self.AFC.stepper[lane.name]
+        # Making sure current is at higher value before moving filament
+        CUR_LANE.set_load_current()
+        CUR_LANE.do_enable(True)
         CUR_LANE.move(distance, self.short_moves_speed, self.short_moves_accel, True)
+        CUR_LANE.do_enable(False)
 
     def save_pos(self):
         # Only save previous location on the first toolchange call to keep an error state from overwriting the location
@@ -444,6 +452,9 @@ class afc:
         CUR_HUB = self.printer.lookup_object('AFC_hub '+ CUR_LANE.unit)
         if CUR_LANE.prep_state == False: return
 
+        # Making sure current is at higher value before moving filament
+        CUR_LANE.set_load_current()
+
         if CUR_LANE.load_state == False:
             CUR_LANE.do_enable(True)
             while CUR_LANE.load_state == False:
@@ -477,6 +488,10 @@ class afc:
         Returns:
             None
         """
+        if not self.is_homed():
+            self.ERROR.AFC_error("Please home printer before doing a tool unload", False)
+            return False
+
         lane = gcmd.get('LANE', None)
         if lane not in self.AFC.stepper:
                 self.AFC.gcode.respond_info(lane + ' Unknown')
@@ -489,6 +504,10 @@ class afc:
             # once user removes filament lanes status will go to None
             CUR_LANE.status = 'ejecting'
             self.save_vars()
+
+            # Setting current to higher value for unloading
+            CUR_LANE.set_load_current()
+
             CUR_LANE.do_enable(True)
             if CUR_LANE.hub_load:
                 CUR_LANE.move(CUR_LANE.dist_hub * -1, CUR_LANE.dist_hub_move_speed, CUR_LANE.dist_hub_move_accel, True if CUR_LANE.dist_hub > 200 else False)
@@ -545,6 +564,10 @@ class afc:
         Returns:
             bool: True if load was successful, False if an error occurred.
         """
+        if not self.is_homed():
+            self.ERROR.AFC_error("Please home printer before doing a tool load", False)
+            return False
+
         if CUR_LANE is None:
             # Exit early if no lane is provided.
             return False
@@ -580,6 +603,9 @@ class afc:
                 if self.heater.target_temp <= self.heater.min_extrude_temp:
                     self.gcode.respond_info('Extruder below min_extrude_temp, heating to 5 degrees above min.')
                     pheaters.set_temperature(extruder.get_heater(), self.heater.min_extrude_temp + 5, wait=True)
+
+            # Setting current to higher value for loading
+            CUR_LANE.set_load_current()
 
             # Enable the lane for filament movement.
             CUR_LANE.do_enable(True)
@@ -651,6 +677,9 @@ class afc:
             self.current = CUR_LANE.name
             CUR_EXTRUDER.enable_buffer()
 
+            # Update lane and extruder state for tracking.
+            self._set_current_lane_active(CUR_LANE, CUR_EXTRUDER)
+
             # Activate the tool-loaded LED and handle filament operations if enabled.
             self.afc_led(self.led_tool_loaded, CUR_LANE.led_index)
             if self.poop:
@@ -668,6 +697,7 @@ class afc:
             self.SPOOL.set_active_spool(CUR_LANE.spool_id)
             self.afc_led(self.led_tool_loaded, CUR_LANE.led_index)
             self.save_vars()
+            
         else:
             # Handle errors if the hub is not clear or the lane is not ready for loading.
             if CUR_HUB.state:
@@ -680,6 +710,32 @@ class afc:
                 return False
 
         return True
+    
+    # def cmd_SET_CURRENT_LANE(self, gcmd):
+    #     lane = gcmd.get('LANE', None)
+    #     CUR_LANE = self.printer.lookup_object('AFC_stepper ' + lane)
+    #     CUR_EXTRUDER = self.printer.lookup_object('AFC_extruder ' + CUR_LANE.extruder_name)
+    #     self._set_current_lane_active(CUR_LANE, CUR_EXTRUDER)
+    
+    def _set_current_lane_active(self, CUR_LANE, CUR_EXTRUDER):
+
+        CUR_LANE.extruder_stepper.sync_to_extruder(CUR_LANE.extruder_name)
+
+        # Update tool and lane status.
+        CUR_LANE.status = 'tool'
+        self.lanes[CUR_LANE.unit][CUR_LANE.name]['tool_loaded'] = True
+        self.current = CUR_LANE.name
+        CUR_EXTRUDER.enable_buffer()
+
+        # Lowering the current while printing
+        CUR_LANE.set_print_current()
+
+        # Update lane and extruder state for tracking.
+        self.lanes[CUR_LANE.unit][CUR_LANE.name]['hub_loaded'] = True
+        self.extruders[CUR_LANE.extruder_name]['lane_loaded'] = CUR_LANE.name
+        self.SPOOL.set_active_spool(self.lanes[CUR_LANE.unit][CUR_LANE.name]['spool_id'])
+        self.afc_led(self.led_tool_loaded, CUR_LANE.led_index)
+        self.save_vars()
 
     cmd_TOOL_UNLOAD_help = "Unload from tool head"
     def cmd_TOOL_UNLOAD(self, gcmd):
@@ -724,6 +780,10 @@ class afc:
         Returns:
             bool: True if unloading was successful, False if an error occurred.
         """
+        if not self.is_homed():
+            self.ERROR.AFC_error("Please home printer before doing a tool unload", False)
+            return False
+
         if CUR_LANE is None:
             # If no lane is provided, exit the function early with a failure.
             return False
@@ -765,6 +825,9 @@ class afc:
         if self.heater.target_temp <= self.heater.min_extrude_temp:
             self.gcode.respond_info('Extruder below min_extrude_temp, heating to 5 degrees above min.')
             pheaters.set_temperature(extruder.get_heater(), self.heater.min_extrude_temp + 5, wait)
+
+        # Setting current to higher value for unloading
+        CUR_LANE.set_load_current()
 
         # Enable the lane for unloading operations.
         CUR_LANE.do_enable(True)
@@ -811,7 +874,7 @@ class afc:
                 num_tries += 1
                 if num_tries > self.tool_max_unload_attempts:
                     # Handle failure if the filament cannot be unloaded.
-                    message = ('FAILED TO UNLOAD {}. FILAMENT STUCK IN TOOLHEAD.'.format(CUR_LANE.name.upper()))
+                    message = ('FAILED TO UNLOAD. FILAMENT STUCK IN TOOLHEAD.')
                     self.ERROR.handle_lane_failure(CUR_LANE, message)
                     return False
                 CUR_LANE.extruder_stepper.sync_to_extruder(CUR_LANE.extruder_name)
@@ -834,6 +897,8 @@ class afc:
         # Clear toolhead's loaded state for easier error handling later.
         CUR_LANE.tool_loaded = False
         self.extruders[CUR_LANE.extruder_name]['lane_loaded'] = ''
+        CUR_LANE.status = None
+        self.current = None
         self.save_vars()
 
         # Ensure filament is fully cleared from the hub.
@@ -843,7 +908,7 @@ class afc:
             num_tries += 1
             if num_tries > (CUR_HUB.afc_bowden_length / self.short_move_dis):
                 # Handle failure if the filament doesn't clear the hub.
-                message = 'HUB NOT CLEARING'
+                message = 'HUB NOT CLEARING\n'
                 self.ERROR.handle_lane_failure(CUR_LANE, message)
                 return False
 
@@ -857,14 +922,15 @@ class afc:
             else:
                 self.gcode.run_script_from_command(CUR_HUB.cut_cmd)
 
-        # Confirm the hub is clear after the cut.
-        while CUR_HUB.state:
-            CUR_LANE.move(self.short_move_dis * -1, self.short_moves_speed, self.short_moves_accel, True)
-            num_tries += 1
-            if num_tries > (CUR_HUB.afc_bowden_length / self.short_move_dis):
-                message = 'HUB NOT CLEARING'
-                self.ERROR.handle_lane_failure(CUR_LANE, message)
-                return False
+            # Confirm the hub is clear after the cut.
+            while CUR_HUB.state:
+                CUR_LANE.move(self.short_move_dis * -1, self.short_moves_speed, self.short_moves_accel, True)
+                num_tries += 1
+                # TODO: Figure out max number of tries
+                if num_tries > (CUR_HUB.afc_bowden_length / self.short_move_dis):
+                    message = 'HUB NOT CLEARING after hub cut\n'
+                    self.ERROR.handle_lane_failure(CUR_LANE, message)
+                    return False
 
         # Finalize unloading and reset lane state.
         CUR_LANE.hub_load = True
@@ -895,7 +961,7 @@ class afc:
             None
         """
         if not self.is_homed():
-            self.ERROR.AFC_error("Please home printer before doing a toolchange", False)
+            self.ERROR.AFC_error("Please home printer before doing a tool change", False)
             return
 
         tmp = gcmd.get_commandline()
@@ -964,6 +1030,8 @@ class afc:
                 self.gcode.respond_info("{} is now loaded in toolhead".format(lane))
                 self.restore_pos()
                 self.in_toolchange = False
+        else:
+            self.gcode.respond_info("{} already loaded".format(lane))
 
     def get_filament_status(self, LANE):
         if LANE.prep_state:

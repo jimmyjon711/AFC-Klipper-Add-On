@@ -38,14 +38,14 @@ class afcBoxTurtle:
         try: CUR_EXTRUDER = self.printer.lookup_object('AFC_extruder ' + CUR_LANE.extruder_name)
         except:
             error_string = 'Error: No config found for extruder: ' + CUR_LANE.extruder_name + ' in [AFC_stepper ' + CUR_LANE.name + ']. Please make sure [AFC_extruder ' + CUR_LANE.extruder_name + '] config exists in AFC_Hardware.cfg'
-            self.AFC.AFC_error(error_string, False)
+            self.AFC.ERROR.AFC_error(error_string, False)
             return False
 
         # Run test reverse/forward on each lane
         CUR_LANE.extruder_stepper.sync_to_extruder(None)
-        CUR_LANE.move( 5, self.AFC.short_moves_speed, self.AFC.short_moves_accel, True)
-        self.AFC.reactor.pause(self.AFC.reactor.monotonic() + delay)
-        CUR_LANE.move( -5, self.AFC.short_moves_speed, self.AFC.short_moves_accel, True)
+        # CUR_LANE.move( 5, self.AFC.short_moves_speed, self.AFC.short_moves_accel, True)
+        # self.AFC.reactor.pause(self.AFC.reactor.monotonic() + delay)
+        # CUR_LANE.move( -5, self.AFC.short_moves_speed, self.AFC.short_moves_accel, True)
 
         if CUR_LANE.prep_state == False:
             if CUR_LANE.load_state == False:
@@ -247,6 +247,9 @@ class afcBoxTurtle:
             CUR_EXTRUDER = self.printer.lookup_object('AFC_extruder ' + CUR_LANE.extruder_name)
             CUR_HUB = self.printer.lookup_object('AFC_hub ' + CUR_LANE.unit)
             self.AFC.gcode.respond_info('Calibrating Bowden Length with {}'.format(CUR_LANE.name.upper()))
+
+            # Making sure current is at higher value before moving filament
+            CUR_LANE.set_load_current()
 
             move_until_state(CUR_LANE, lambda: CUR_HUB.state, CUR_HUB.move_dis, tol, short_dis)
 
