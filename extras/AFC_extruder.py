@@ -83,8 +83,8 @@ class AFCextruder:
 
     def tool_start_callback(self, eventtime, state):
         self.tool_start_state = state
-    def buffer_trailing_callback(self, eventtime, state):
-        self.buffer_trailing = state
+    # def buffer_trailing_callback(self, eventtime, state):
+    #     self.buffer_trailing = state
     def tool_end_callback(self, eventtime, state):
         self.tool_end_state = state
 

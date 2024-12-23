@@ -39,8 +39,7 @@ class afc_hub:
 
         self.buffer_name = config.get('buffer', None)
         self.buffer_obj = None
-        if self.buffer_name is not None:
-            self.buffer_obj = self.printer.lookup_object('AFC_buffer {}'.format(self.buffer_name))
+        
 
     def handle_connect(self):
         """
@@ -51,6 +50,11 @@ class afc_hub:
         self.AFC = self.printer.lookup_object('AFC')
         self.gcode = self.AFC.gcode
         self.reactor = self.AFC.reactor
+
+        if self.buffer_name is not None:
+            self.buffer_obj = self.printer.lookup_object('AFC_buffer {}'.format(self.buffer_name))
+        self.AFC.gcode.respond_info("AFC_{}:ready".format(self.name))
+        self.printer.send_event("AFC_{}:ready".format(self.name))
 
 
     def switch_pin_callback(self, eventtime, state):

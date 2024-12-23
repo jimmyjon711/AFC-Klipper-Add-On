@@ -52,7 +52,6 @@ class AFCExtruderStepper:
         self.reactor = self.printer.get_reactor()
         self.extruder_stepper = extruder.ExtruderStepper(config)
 
-        self.printer.register_event_handler("klippy:connect", self.handle_connect)
 
         #stored status variables
         self.name = config.get_name().split()[-1]
@@ -76,6 +75,8 @@ class AFCExtruderStepper:
         else:
             self.unit = 'Unknown'
             self.index = 0
+
+        self.printer.register_event_handler("AFC_{}:ready".format(self.unit), self.handle_ready)
         self.hub= ''
 
         self.motion_queue = None
@@ -138,7 +139,8 @@ class AFCExtruderStepper:
         # Get and save base rotation dist
         self.base_rotation_dist = self.extruder_stepper.stepper.get_rotation_distance()[0]
     
-    def handle_connect(self):
+    # Gets ready signal from unit so that information can be fill in correctly without having to worry about configuration order
+    def handle_ready(self):
         self.extruder_obj = self.printer.lookup_object('AFC_extruder {}'.format(self.extruder_name))
         self.unit_obj = self.printer.lookup_object("AFC_hub {}".format(self.unit))
         self.buffer_obj = self.unit_obj.buffer_obj
@@ -147,7 +149,7 @@ class AFCExtruderStepper:
                 self.AFC.gcode.respond_info("test")
                 self.buffer_obj = self.printer.lookup_object("AFC_buffer {}".format(self.extruder_obj.buffer_name))
         
-        self.AFC.gcode.respond_info("Buffer Obj: {}".format(self.buffer_obj))
+        self.AFC.gcode.respond_info("{} Buffer Obj: {}".format(self.name, self.buffer_obj))
 
         # Add self to AFC lane objs
         self.AFC.add_lane(self.name, self)
