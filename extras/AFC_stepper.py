@@ -149,6 +149,9 @@ class AFCExtruderStepper:
         
         self.AFC.gcode.respond_info("Buffer Obj: {}".format(self.buffer_obj))
 
+        # Add self to AFC lane objs
+        self.AFC.add_lane(self.name, self)
+
     def get_toolhead_sensor_state(self):
         if self.extruder_obj.tool_start == "buffer":
             return self.buffer_obj.advance_state

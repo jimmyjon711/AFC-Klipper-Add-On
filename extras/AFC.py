@@ -30,6 +30,8 @@ class afc:
         self.tool_cmds={}
         self.afc_monitoring = False
 
+        self.lane_obj = {}
+
         self.desired_order_list = config.get('Vdesired_order_list','')
 
         # tool position when tool change was requested
@@ -105,7 +107,8 @@ class afc:
 
         # Printing here will not display in console but it will go to klippy.log
         self.print_version()
-
+    def add_lane(self, lane_name, obj):
+        self.lane_obj.update({lane_name: obj})
     def _update_trsync(self, config):
         # Logic to update trsync values
         update_trsync = config.getboolean("trsync_update", False)
@@ -188,7 +191,7 @@ class afc:
                 CUR_EXTRUDER = self.printer.lookup_object('AFC_extruder ' + CUR_LANE.extruder_name)
                 if self.current != None:
                     if self.current == CUR_LANE.name:
-                        if not CUR_EXTRUDER.tool_start_state or not CUR_HUB.state:
+                        if not CUR_LANE.get_toolhead_sensor_state() or not CUR_HUB.state:
                             lane_msg += '<span class=warning--text>{:<{}} </span>'.format(CUR_LANE.name.upper(), max_lane_length)
                         else:
                             lane_msg += '<span class=success--text>{:<{}} </span>'.format(CUR_LANE.name.upper(), max_lane_length)
@@ -210,12 +213,19 @@ class afc:
                 status_msg += 'HUB: <span class=success--text><-></span>'
             else:
                 status_msg += 'HUB: <span class=error--text>x</span>'
-            if CUR_EXTRUDER.tool_start_state == True:
-                status_msg += '  Tool: <span class=success--text><-></span>'
+            
+            extruder_msg = '  Tool: <span class=error--text>x</span>'
+            if CUR_EXTRUDER.tool_start != "buffer":
+                if CUR_EXTRUDER.tool_start_state == True:
+                    extruder_msg = '  Tool: <span class=success--text><-></span>'
             else:
-                status_msg += '  Tool: <span class=error--text>x</span>'
+                if CUR_EXTRUDER.lane_loaded and CUR_EXTRUDER.lane_loaded in self.units[UNIT]:
+                    if self.lane_obj[CUR_EXTRUDER.lane_loaded].get_toolhead_sensor_state() == True:
+                        extruder_msg = '  Tool: <span class=success--text><-></span>'
+
+            status_msg += extruder_msg
             if CUR_EXTRUDER.tool_start == 'buffer':
-                status_msg += '\n<span class=info--text>Ram sensor enabled</span>'
+                status_msg += '\n<span class=info--text>Ram sensor enabled</span>\n'
         self.gcode.respond_raw(status_msg)
 
     cmd_SET_BOWDEN_LENGTH_help = "Helper to dynamically set length of bowden between hub and toolhead. Pass in HUB if using multiple box turtles"
