@@ -52,10 +52,13 @@ class AFCExtruderStepper:
         self.reactor = self.printer.get_reactor()
         self.extruder_stepper = extruder.ExtruderStepper(config)
 
+        self.printer.register_event_handler("klippy:connect", self.handle_connect)
+
         #stored status variables
         self.name = config.get_name().split()[-1]
         self.extruder_name = config.get('extruder')
         self.extruder_obj = None
+        self.unit_obj = None
 
         self.map = config.get('cmd','NONE')
         self.tool_loaded = False
@@ -134,6 +137,22 @@ class AFCExtruderStepper:
 
         # Get and save base rotation dist
         self.base_rotation_dist = self.extruder_stepper.stepper.get_rotation_distance()[0]
+    
+    def handle_connect(self):
+        self.extruder_obj = self.printer.lookup_object('AFC_extruder {}'.format(self.extruder_name))
+        self.unit_obj = self.printer.lookup_object("AFC_hub {}".format(self.unit))
+        if self.extruder_obj.tool_start == "buffer":
+            if self.extruder_obj.buffer_name is not None:
+                self.AFC.gcode.respond_info("test")
+                self.buffer_obj = self.printer.lookup_object("AFC_buffer {}".format(self.extruder_obj.buffer_name))
+            else:
+                self.buffer_obj = self.unit_obj.buffer_obj
+
+    def get_toolhead_sensor_state(self):
+        if self.extruder_obj.tool_start == "buffer":
+            return self.buffer_obj.advance_state
+        else:
+            return self.extruder_obj.tool_start_state
 
     def assist(self, value, is_resend=False):
         if self.afc_motor_rwd is None:

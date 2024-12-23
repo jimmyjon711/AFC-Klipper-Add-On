@@ -71,7 +71,7 @@ class afcBoxTurtle:
                 msg +="<span class=success--text> AND LOADED</span>"
 
                 if CUR_LANE.tool_loaded:
-                    if CUR_LANE.extruder_obj.tool_start_state == True or CUR_LANE.extruder_obj.tool_start == "buffer":
+                    if CUR_LANE.get_toolhead_sensor_state() == True or CUR_LANE.extruder_obj.tool_start == "buffer":
                         if self.AFC.extruders[CUR_LANE.extruder_name]['lane_loaded'] == CUR_LANE.name:
                             CUR_LANE.extruder_stepper.sync_to_extruder(CUR_LANE.extruder_name)
                             msg +="<span class=primary--text> in ToolHead</span>"

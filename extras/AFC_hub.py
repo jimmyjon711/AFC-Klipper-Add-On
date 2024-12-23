@@ -37,6 +37,11 @@ class afc_hub:
             self.state = False
             buttons.register_buttons([self.switch_pin], self.switch_pin_callback)
 
+        self.buffer_name = config.get('buffer', None)
+        self.buffer_obj = None
+        if self.buffer_name is not None:
+            self.buffer_obj = self.printer.lookup_object('AFC_buffer {}'.format(self.buffer_name))
+
     def handle_connect(self):
         """
         Handle the connection event.

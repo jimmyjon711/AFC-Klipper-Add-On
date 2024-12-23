@@ -23,6 +23,8 @@ class AFCtrigger:
         self.last_state = False
         self.enable = False
         self.current = ''
+        self.advance_state = False
+        self.trailing_state = False
 
         self.debug = config.getboolean("debug", False)
         self.buttons = self.printer.load_object(config, "buttons")
@@ -159,6 +161,7 @@ class AFCtrigger:
         self.gcode.respond_info("Rotation distance reset : {}".format(cur_stepper.extruder_stepper.stepper.get_rotation_distance()[0]))
 
     def advance_callback(self, eventime, state):
+        self.advance_state = state
         if self.printer.state_message == 'Printer is ready' and self.enable:
             CUR_LANE = self.printer.lookup_object('AFC_stepper ' + self.AFC.current)
             if self.AFC.current != None and state:
@@ -170,6 +173,7 @@ class AFCtrigger:
         self.last_state = ADVANCE_STATE_NAME
 
     def trailing_callback(self, eventime, state):
+        self.trailing_state = state
         if self.printer.state_message == 'Printer is ready' and self.enable:
             CUR_LANE = self.printer.lookup_object('AFC_stepper ' + self.AFC.current)
             if self.AFC.current != None and state:

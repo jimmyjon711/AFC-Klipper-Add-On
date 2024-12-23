@@ -30,27 +30,29 @@ class AFCextruder:
 
       # RAMMING
       # Use buffer sensors for loading and unloading filament
-      if self.tool_start == "buffer":
-         self.r_enabled = False
-         b = config.getsection("AFC_buffer {}".format(self.buffer_name))
-         ap = b.get('advance_pin', None)
-         tp = b.get('trailing_pin', None)
-         if ap is not None and tp is not None:
-            self.r_enabled = True
-            self.advance_pin = ap
-            self.trailing_pin = tp
-            pins = ap.strip("!^"), tp.strip("!^")
-            for pin_desc in pins:
-                  ppins.allow_multi_use_pin(pin_desc)
-         else:
-            self.gcode.respond_info("advance_pin and trailing_pin must be defined to enable ram sensor")
+    #   if self.tool_start == "buffer" and self.buffer_name is not None:
+    #      self.r_enabled = False
+    #      b = config.getsection("AFC_buffer {}".format(self.buffer_name))
+    #      ap = b.get('advance_pin', None)
+    #      tp = b.get('trailing_pin', None)
+    #      if ap is not None and tp is not None:
+    #         self.r_enabled = True
+    #         self.advance_pin = ap
+    #         self.trailing_pin = tp
+    #         pins = ap.strip("!^"), tp.strip("!^")
+    #         for pin_desc in pins:
+    #               ppins.allow_multi_use_pin(pin_desc)
+    #      else:
+    #         self.gcode.respond_info("advance_pin and trailing_pin must be defined to enable ram sensor")
 
       if self.tool_start is not None:
-        if self.tool_start == "buffer" and self.r_enabled == True:
-           self.tool_start_state = False
-           self.buffer_trailing = False
-           buttons.register_buttons([self.advance_pin], self.tool_start_callback)
-           buttons.register_buttons([self.trailing_pin], self.buffer_trailing_callback)
+        if self.tool_start == "buffer":
+            self.gcode.respond_info("Setting up as buffer")
+            # if self.buffer_name is not None and self.r_enabled == True:
+            #     self.tool_start_state = False
+            #     self.buffer_trailing = False
+            #     buttons.register_buttons([self.advance_pin], self.tool_start_callback)
+            #     buttons.register_buttons([self.trailing_pin], self.buffer_trailing_callback)
         else:
           self.tool_start_state = False
           buttons.register_buttons([self.tool_start], self.tool_start_callback)
