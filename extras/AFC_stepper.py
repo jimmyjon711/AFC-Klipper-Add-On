@@ -244,6 +244,11 @@ class AFCExtruderStepper:
             led = self.led_index
             if self.prep_state == True:
                 x = 0
+                # Check to see if the printer is printing or moving as trying to load while printer is doing something will crash klipper
+                if self.AFC.is_printing():
+                    self.AFC.ERROR.AFC_error("Cannot load spools while printer is actively moving or homing", False)
+                    return
+
                 while self.load_state == False and self.prep_state == True:
                     x += 1
                     self.do_enable(True)
