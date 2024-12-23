@@ -46,60 +46,60 @@ class afc:
         self.absolute_coord = True
 
         # SPOOLMAN
-        self.spoolman_ip = config.get('spoolman_ip', None)
-        self.spoolman_port = config.get('spoolman_port', None)
+        self.spoolman_ip = config.get('spoolman_ip', None)                          # To utilize spoolman enter spoolmans IP address
+        self.spoolman_port = config.get('spoolman_port', None)                      # To utilize spoolman enter spoolmans port
 
         #LED SETTINGS
         self.ind_lights = None
-        self.led_name = config.get('led_name')
-        self.led_fault =config.get('led_fault','1,0,0,0')
-        self.led_ready = config.get('led_ready','1,1,1,1')
-        self.led_not_ready = config.get('led_not_ready','1,1,0,0')
-        self.led_loading = config.get('led_loading','1,0,0,0')
-        self.led_prep_loaded = config.get('led_loading','1,1,0,0')
-        self.led_unloading = config.get('led_unloading','1,1,.5,0')
-        self.led_tool_loaded = config.get('led_tool_loaded','1,1,0,0')
-        self.led_advancing = config.get('led_buffer_advancing','0,0,1,0')
-        self.led_trailing = config.get('led_buffer_trailing','0,1,0,0')
-        self.led_buffer_disabled = config.get('led_buffer_disable', '0,0,0,0.25')
+        self.led_name = config.get('led_name')                                      # Not used removed?
+        self.led_fault =config.get('led_fault','1,0,0,0')                           # LED color to set when faults occur in lane        (R,G,B,W) 0 = off, 1 = full brightness.
+        self.led_ready = config.get('led_ready','1,1,1,1')                          # LED color to set when lane is ready               (R,G,B,W) 0 = off, 1 = full brightness.
+        self.led_not_ready = config.get('led_not_ready','1,1,0,0')                  # LED color to set when lane not ready              (R,G,B,W) 0 = off, 1 = full brightness.
+        self.led_loading = config.get('led_loading','1,0,0,0')                      # LED color to set when lane is loading             (R,G,B,W) 0 = off, 1 = full brightness.
+        self.led_prep_loaded = config.get('led_loading','1,1,0,0')                  # LED color to set when lane is loaded              (R,G,B,W) 0 = off, 1 = full brightness.
+        self.led_unloading = config.get('led_unloading','1,1,.5,0')                 # LED color to set when lane is unloading           (R,G,B,W) 0 = off, 1 = full brightness.
+        self.led_tool_loaded = config.get('led_tool_loaded','1,1,0,0')              # LED color to set when lane is loaded into tool    (R,G,B,W) 0 = off, 1 = full brightness.
+        self.led_advancing = config.get('led_buffer_advancing','0,0,1,0')           # LED color to set when buffer is advancing         (R,G,B,W) 0 = off, 1 = full brightness.
+        self.led_trailing = config.get('led_buffer_trailing','0,1,0,0')             # LED color to set when buffer is trailing          (R,G,B,W) 0 = off, 1 = full brightness.
+        self.led_buffer_disabled = config.get('led_buffer_disable', '0,0,0,0.25')   # LED color to set when buffer is disabled          (R,G,B,W) 0 = off, 1 = full brightness.
 
         # TOOL Cutting Settings
         self.tool = ''
-        self.tool_cut = config.getboolean("tool_cut", False)
-        self.tool_cut_cmd = config.get('tool_cut_cmd', None)
+        self.tool_cut = config.getboolean("tool_cut", False)                        # Set to True to enable toolhead cutting
+        self.tool_cut_cmd = config.get('tool_cut_cmd', None)                        # Macro to use when doing toolhead cutting. Change macro name if you would like to use your own cutting macro
 
         # CHOICES
-        self.park = config.getboolean("park", False)
-        self.park_cmd = config.get('park_cmd', None)
-        self.kick = config.getboolean("kick", False)
-        self.kick_cmd = config.get('kick_cmd', None)
-        self.wipe = config.getboolean("wipe", False)
-        self.wipe_cmd = config.get('wipe_cmd', None)
-        self.poop = config.getboolean("poop", False)
-        self.poop_cmd = config.get('poop_cmd', None)
+        self.park = config.getboolean("park", False)                                # Set to True to enable parking during unload
+        self.park_cmd = config.get('park_cmd', None)                                # Macro to use when parking. Change macro name if you would like to use your own park macro
+        self.kick = config.getboolean("kick", False)                                # Set to True to enable poop kicking after lane loads
+        self.kick_cmd = config.get('kick_cmd', None)                                # Macro to use when kicking. Change macro name if you would like to use your own kick macro
+        self.wipe = config.getboolean("wipe", False)                                # Set to True to enable nozzle wipeing after lane loads
+        self.wipe_cmd = config.get('wipe_cmd', None)                                # Macro to use when nozzle wipeing. Change macro name if you would like to use your own wipe macro
+        self.poop = config.getboolean("poop", False)                                # Set to True to enable pooping(purging color) after lane loads
+        self.poop_cmd = config.get('poop_cmd', None)                                # Macro to use when pooping. Change macro name if you would like to use your own poop/purge macro
 
-        self.form_tip = config.getboolean("form_tip", False)
-        self.form_tip_cmd = config.get('form_tip_cmd', None)
+        self.form_tip = config.getboolean("form_tip", False)                        # Set to True to tip forming when unloading lanes
+        self.form_tip_cmd = config.get('form_tip_cmd', None)                        # Macro to use when tip forming. Change macro name if you would like to use your own tip forming macro
 
         # MOVE SETTINGS
-        self.tool_sensor_after_extruder = config.getfloat("tool_sensor_after_extruder", 0)
-        self.long_moves_speed = config.getfloat("long_moves_speed", 100)
-        self.long_moves_accel = config.getfloat("long_moves_accel", 400)
-        self.short_moves_speed = config.getfloat("short_moves_speed", 25)
-        self.short_moves_accel = config.getfloat("short_moves_accel", 400)
-        self.short_move_dis = config.getfloat("short_move_dis", 10)
-        self.tool_max_unload_attempts = config.getint('tool_max_unload_attempts', 2)
-        self.tool_max_load_checks = config.getint('tool_max_load_checks', 4)
-        self.z_hop =config.getfloat("z_hop", 0)
-        self.xy_resume =config.getboolean("xy_resume", False)
-        self.resume_speed =config.getfloat("resume_speed", 0)
-        self.resume_z_speed = config.getfloat("resume_z_speed", 0)
+        self.long_moves_speed = config.getfloat("long_moves_speed", 100)            # Speed in mm/s to move filament when doing long moves 
+        self.long_moves_accel = config.getfloat("long_moves_accel", 400)            # Acceleration in mm/s squared when doing long moves
+        self.short_moves_speed = config.getfloat("short_moves_speed", 25)           # Speed in mm/s to move filament when doing short moves 
+        self.short_moves_accel = config.getfloat("short_moves_accel", 400)          # Acceleration in mm/s squared when doing short moves
+        self.short_move_dis = config.getfloat("short_move_dis", 10)                 # Move distance in mm for failsafe moves.
+        self.tool_max_unload_attempts = config.getint('tool_max_unload_attempts', 2)# Max number of attempts to unload filament from toolhead when using buffer as ramming sensor
+        self.tool_max_load_checks = config.getint('tool_max_load_checks', 4)        # Max number of attempts to check to make sure filament is loaded into toolhead extruder when using buffer as ramming sensor
 
-        self.global_print_current = config.getfloat("global_print_current", None)           # Global variable to set steppers current to a specified current when printing. Going lower than 0.6 may result in TurtleNeck buffer's not working correctly
+        self.z_hop =config.getfloat("z_hop", 0)                                     # Height to move up before and after a tool change completes
+        self.xy_resume =config.getboolean("xy_resume", False)                       # Need description or remove as this is currently an unused variable
+        self.resume_speed =config.getfloat("resume_speed", 0)                       # Speed mm/s of resume move. Set to 0 to use gcode speed
+        self.resume_z_speed = config.getfloat("resume_z_speed", 0)                  # Speed mm/s of resume move in Z. Set to 0 to use gcode speed
+
+        self.global_print_current = config.getfloat("global_print_current", None)   # Global variable to set steppers current to a specified current when printing. Going lower than 0.6 may result in TurtleNeck buffer's not working correctly
 
         self._update_trsync(config)
 
-        self.VarFile = config.get('VarFile')
+        self.VarFile = config.get('VarFile')                                        # Path to the variables file for AFC configuration.
 
         # Get debug and cast to boolean
         #self.debug = True == config.get('debug', 0)
@@ -110,12 +110,12 @@ class afc:
 
     def _update_trsync(self, config):
         # Logic to update trsync values
-        update_trsync = config.getboolean("trsync_update", False)
+        update_trsync = config.getboolean("trsync_update", False)                   # Set to true to enable updating trsync value in klipper mcu. Enabling this and updating the timeouts can help with Timer Too Close(TTC) errors
         if update_trsync:
             try:
                 import mcu
-                trsync_value = config.getfloat("trsync_timeout", 0.05)
-                trsync_single_value = config.getfloat("trsync_single_timeout", 0.5)
+                trsync_value = config.getfloat("trsync_timeout", 0.05)              # Timeout value to update in klipper mcu. Klippers default value is 0.025
+                trsync_single_value = config.getfloat("trsync_single_timeout", 0.5) # Single timeout value to update in klipper mcu. Klippers default value is 0.250
                 self.gcode.respond_info("Applying TRSYNC update")
 
                 # Making sure value exists as kalico(danger klipper) does not have TRSYNC_TIMEOUT value
