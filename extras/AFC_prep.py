@@ -16,6 +16,8 @@ class afcPrep:
 
         # Flag to set once resume rename as occured for the first time
         self.rename_occured = False
+        # Value gets set to false once prep has been ran for the first time after restarting klipper
+        self.assignTcmd = True
 
     def handle_connect(self):
         """
@@ -128,7 +130,7 @@ class afcPrep:
 
                 LaneCheck = True
                 for LANE in self.AFC.units[UNIT].keys():
-                    if not CUR_HUB.unit.system_Test(UNIT,LANE, self.delay):
+                    if not CUR_HUB.unit.system_Test(UNIT,LANE, self.delay, self.assignTcmd):
                         LaneCheck = False
 
                 if LaneCheck:
@@ -150,6 +152,10 @@ class afcPrep:
         # Defaulting to no active spool, putting at end so endpoint has time to register
         if self.AFC.current is None:
             self.AFC.SPOOL.set_active_spool( None )
+
+        # Setting value to False so the T commands do try to get reassigned when users manually
+        #   run PREP after it has already be ran once upon boot
+        self.assignTcmd = False
 
 def load_config(config):
     return afcPrep(config)

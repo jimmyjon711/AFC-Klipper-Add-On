@@ -21,7 +21,7 @@ class afcNightOwl:
 
         self.logo_error = '<span class=error--text>Night Owl Not Ready</span>\n'
 
-    def system_Test(self, UNIT, LANE, delay):
+    def system_Test(self, UNIT, LANE, delay, assignTcmd):
         msg = ''
         succeeded = True
         if LANE not in self.AFC.stepper:
@@ -87,7 +87,7 @@ class afcNightOwl:
                         if not lane_check:
                             return False
 
-        self.AFC.TcmdAssign(CUR_LANE)
+        if assignTcmd: self.AFC.TcmdAssign(CUR_LANE)
         CUR_LANE.do_enable(False)
         self.AFC.gcode.respond_info( '{lane_name} tool cmd: {tcmd:3} {msg}'.format(lane_name=CUR_LANE.name.upper(), tcmd=CUR_LANE.map, msg=msg))
         CUR_LANE.set_afc_prep_done()
