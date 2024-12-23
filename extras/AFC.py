@@ -95,6 +95,8 @@ class afc:
         self.resume_speed =config.getfloat("resume_speed", 0)
         self.resume_z_speed = config.getfloat("resume_z_speed", 0)
 
+        self.global_print_current = config.getfloat("global_print_current", None)           # Global variable to set steppers current to a specified current when printing. Going lower than 0.6 may result in TurtleNeck buffer's not working correctly
+
         self._update_trsync(config)
 
         self.VarFile = config.get('VarFile')
@@ -295,7 +297,10 @@ class afc:
             self.gcode.respond_info('{} Unknown'.format(lane.upper()))
             return
         CUR_LANE = self.stepper[lane]
+
+        CUR_LANE.do_enable(True)
         CUR_LANE.move(distance, self.short_moves_speed, self.short_moves_accel, True)
+        CUR_LANE.do_enable(False)
 
     def save_pos(self):
         # Only save previous location on the first toolchange call to keep an error state from overwriting the location
@@ -640,7 +645,7 @@ class afc:
             # Synchronize lane's extruder stepper and finalize tool loading.
             CUR_LANE.status = 'Tooled'
             self.save_vars()
-            CUR_LANE.extruder_stepper.sync_to_extruder(CUR_LANE.extruder_name)
+            CUR_LANE.sync_to_extruder()
 
             # Adjust tool position for loading.
             pos = self.toolhead.get_position()
@@ -652,7 +657,7 @@ class afc:
             # Lane will load until Advance sensor is True
             # After the tool_stn distance the lane will retract off the sensor to confirm load and reset buffer
             if CUR_EXTRUDER.tool_start == "buffer":
-                CUR_LANE.extruder_stepper.sync_to_extruder(None)
+                CUR_LANE.unsync_to_extruder()
                 load_checks = 0
                 while CUR_EXTRUDER.tool_start_state == True:
                     CUR_LANE.move( self.short_move_dis * -1, self.short_moves_speed, self.short_moves_accel )
@@ -664,7 +669,7 @@ class afc:
                         msg += "Tool may not be loaded"
                         self.gcode.respond_info("<span class=warning--text>{}</span>".format(msg))
                         break
-                CUR_LANE.extruder_stepper.sync_to_extruder(CUR_LANE.extruder_name)
+                CUR_LANE.sync_to_extruder()
             # Update tool and lane status.
             CUR_LANE.status = 'Tooled'
             CUR_LANE.tool_loaded = True
@@ -780,7 +785,7 @@ class afc:
 
         if CUR_LANE.extruder_stepper.motion_queue != CUR_LANE.extruder_name:
             # Synchronize the extruder stepper with the lane.
-            CUR_LANE.extruder_stepper.sync_to_extruder(CUR_LANE.extruder_name)
+            CUR_LANE.sync_to_extruder()
 
         # Check and set the extruder temperature if below the minimum.
         wait = True
@@ -812,7 +817,7 @@ class afc:
         num_tries = 0
         if CUR_EXTRUDER.tool_start == "buffer":
             # if ramming is enabled, AFC will retract to collapse buffer before unloading
-            CUR_LANE.extruder_stepper.sync_to_extruder(None)
+            CUR_LANE.unsync_to_extruder()
             while CUR_EXTRUDER.buffer_trailing == False:
                 # attempt to return buffer to trailng pin
                 CUR_LANE.move( self.short_move_dis * -1, self.short_moves_speed, self.short_moves_accel )
@@ -824,7 +829,7 @@ class afc:
                     msg += "Increasing 'tool_max_unload_attempts' may improve loading reliablity"
                     self.gcode.respond_info("<span class=warning--text>{}</span>".format(msg))
                     break
-            CUR_LANE.extruder_stepper.sync_to_extruder(CUR_LANE.extruder_name)
+            CUR_LANE.sync_to_extruder(False)
             pos = self.toolhead.get_position()
             pos[3] -= CUR_EXTRUDER.tool_stn_unload
             self.toolhead.manual_move(pos, CUR_EXTRUDER.tool_unload_speed)
@@ -837,7 +842,7 @@ class afc:
                     message = ('FAILED TO UNLOAD. FILAMENT STUCK IN TOOLHEAD.')
                     self.ERROR.handle_lane_failure(CUR_LANE, message)
                     return False
-                CUR_LANE.extruder_stepper.sync_to_extruder(CUR_LANE.extruder_name)
+                CUR_LANE.sync_to_extruder()
                 pos = self.toolhead.get_position()
                 pos[3] -= CUR_EXTRUDER.tool_stn_unload
                 self.toolhead.manual_move(pos, CUR_EXTRUDER.tool_unload_speed)
@@ -851,7 +856,7 @@ class afc:
             self.toolhead.wait_moves()
 
         # Synchronize and move filament out of the hub.
-        CUR_LANE.extruder_stepper.sync_to_extruder(None)
+        CUR_LANE.unsync_to_extruder()
         CUR_LANE.move(CUR_HUB.afc_bowden_length * -1, self.long_moves_speed, self.long_moves_accel, True)
 
         # Clear toolhead's loaded state for easier error handling later.
