@@ -82,9 +82,9 @@ class afc:
         self.form_tip_cmd = config.get('form_tip_cmd', None)                        # Macro to use when tip forming. Change macro name if you would like to use your own tip forming macro
 
         # MOVE SETTINGS
-        self.long_moves_speed = config.getfloat("long_moves_speed", 100)            # Speed in mm/s to move filament when doing long moves 
+        self.long_moves_speed = config.getfloat("long_moves_speed", 100)            # Speed in mm/s to move filament when doing long moves
         self.long_moves_accel = config.getfloat("long_moves_accel", 400)            # Acceleration in mm/s squared when doing long moves
-        self.short_moves_speed = config.getfloat("short_moves_speed", 25)           # Speed in mm/s to move filament when doing short moves 
+        self.short_moves_speed = config.getfloat("short_moves_speed", 25)           # Speed in mm/s to move filament when doing short moves
         self.short_moves_accel = config.getfloat("short_moves_accel", 400)          # Acceleration in mm/s squared when doing short moves
         self.short_move_dis = config.getfloat("short_move_dis", 10)                 # Move distance in mm for failsafe moves.
         self.tool_max_unload_attempts = config.getint('tool_max_unload_attempts', 2)# Max number of attempts to unload filament from toolhead when using buffer as ramming sensor

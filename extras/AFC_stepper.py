@@ -142,7 +142,7 @@ class AFCExtruderStepper:
             self.tmc_driver = next(config.getsection(s) for s in config.fileconfig.sections() if 'tmc' in s and config.get_name() in s)
         except:
             raise self.gcode.error("Count not find TMC for stepper {}".format(self.name))
-        
+
         self.tmc_load_current = self.tmc_driver.getfloat('run_current')
 
     def assist(self, value, is_resend=False):
@@ -301,7 +301,7 @@ class AFCExtruderStepper:
             toolhead.dwell(self.next_cmd_time - print_time)
         else:
             self.next_cmd_time = print_time
-    
+
     def sync_to_extruder(self, update_current=True):
         """
         Helper function to sync lane to extruder and set print current if specified.
@@ -326,7 +326,7 @@ class AFCExtruderStepper:
 
         :param current: Sets TMC current to specified value
         """
-        if self.tmc_print_current is not None: 
+        if self.tmc_print_current is not None:
             self.gcode.run_script_from_command("SET_TMC_CURRENT STEPPER='{}' CURRENT={}".format(self.name, current))
 
     def set_load_current(self):
