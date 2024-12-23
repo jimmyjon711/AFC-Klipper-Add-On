@@ -1086,8 +1086,12 @@ class afc:
                 str["system"]["extruders"][EXTRUDE]['tool_end_sensor']   = True == CUR_EXTRUDER.tool_end_state
             else:
                 str["system"]["extruders"][EXTRUDE]['tool_end_sensor']   = None
+            # Buffers should be in their own section
             str["system"]["extruders"][EXTRUDE]['buffer']   = CUR_EXTRUDER.buffer_name
-            str["system"]["extruders"][EXTRUDE]['buffer_status']   = CUR_EXTRUDER.buffer_status()
+            if CUR_EXTRUDER.lane_loaded:
+                str["system"]["extruders"][EXTRUDE]['buffer_status']   = self.lane_obj[CUR_EXTRUDER.lane_loaded].buffer_obj.name
+            else:
+                str["system"]["extruders"][EXTRUDE]['buffer_status']   = "Not Loaded"
         return str
 
     def is_homed(self):
