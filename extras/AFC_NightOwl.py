@@ -79,7 +79,7 @@ class afcNightOwl:
                                 CUR_LANE.extruder_obj.enable_buffer()
                                 CUR_LANE.extruder_obj.lane_loaded = CUR_LANE.name
                         else:
-                            if CUR_LANE.extruder_obj.tool_start_state == True:
+                            if CUR_LANE.get_toolhead_sensor_state() == True:
                                 msg +="<span class=error--text> error in ToolHead. \nLane identified as loaded in AFC.vars.unit file\n but not identified as loaded in AFC.var.tool file</span>"
                                 succeeded = False
                     else:

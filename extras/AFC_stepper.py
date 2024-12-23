@@ -141,12 +141,13 @@ class AFCExtruderStepper:
     def handle_connect(self):
         self.extruder_obj = self.printer.lookup_object('AFC_extruder {}'.format(self.extruder_name))
         self.unit_obj = self.printer.lookup_object("AFC_hub {}".format(self.unit))
+        self.buffer_obj = self.unit_obj.buffer_obj
         if self.extruder_obj.tool_start == "buffer":
             if self.extruder_obj.buffer_name is not None:
                 self.AFC.gcode.respond_info("test")
                 self.buffer_obj = self.printer.lookup_object("AFC_buffer {}".format(self.extruder_obj.buffer_name))
-            else:
-                self.buffer_obj = self.unit_obj.buffer_obj
+        
+        self.AFC.gcode.respond_info("Buffer Obj: {}".format(self.buffer_obj))
 
     def get_toolhead_sensor_state(self):
         if self.extruder_obj.tool_start == "buffer":

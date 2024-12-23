@@ -44,7 +44,8 @@ class AFCextruder:
     #               ppins.allow_multi_use_pin(pin_desc)
     #      else:
     #         self.gcode.respond_info("advance_pin and trailing_pin must be defined to enable ram sensor")
-
+      self.tool_start_state = False
+      self.tool_end_state = False
       if self.tool_start is not None:
         if self.tool_start == "buffer":
             self.gcode.respond_info("Setting up as buffer")
