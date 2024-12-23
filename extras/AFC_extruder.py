@@ -70,16 +70,16 @@ class AFCextruder:
         self.AFC = self.printer.lookup_object('AFC')
         self.reactor = self.AFC.reactor
 
-        self.get_buffer()
+        # self.get_buffer()
 
-    def get_buffer(self):
-      """
-      Retrieve the buffer object associated with the current buffer name.
-      If `buffer_name` is set, this method assigns the buffer object to `self.buffer`
-      by looking it up using the printer's AFC buffer system.
-      """
-      if self.buffer_name is not None:
-          self.buffer = self.printer.lookup_object('AFC_buffer ' + self.buffer_name)
+    # def get_buffer(self):
+    #   """
+    #   Retrieve the buffer object associated with the current buffer name.
+    #   If `buffer_name` is set, this method assigns the buffer object to `self.buffer`
+    #   by looking it up using the printer's AFC buffer system.
+    #   """
+    #   if self.buffer_name is not None:
+    #       self.buffer = self.printer.lookup_object('AFC_buffer ' + self.buffer_name)
 
     def tool_start_callback(self, eventtime, state):
         self.tool_start_state = state
@@ -87,33 +87,6 @@ class AFCextruder:
         self.buffer_trailing = state
     def tool_end_callback(self, eventtime, state):
         self.tool_end_state = state
-
-    def enable_buffer(self):
-      """
-      Enable the buffer if `buffer_name` is set.
-      Retrieves the buffer object and calls its `enable_buffer()` method to activate it.
-      """
-      if self.buffer_name is not None:
-         self.buffer.enable_buffer()
-
-    def disable_buffer(self):
-       """
-       Disable the buffer if `buffer_name` is set.
-       Calls the buffer's `disable_buffer()` method to deactivate it.
-       """
-       if self.buffer_name is not None:
-          self.buffer.disable_buffer()
-
-    def buffer_status(self):
-       """
-       Retrieve the current status of the buffer.
-       If `buffer_name` is set, returns the buffer's status using `buffer_status()`.
-       Otherwise, returns None.
-       """
-       if self.buffer_name is not None:
-          return self.buffer.buffer_status()
-
-       else: return None
 
 def load_config_prefix(config):
     return AFCextruder(config)

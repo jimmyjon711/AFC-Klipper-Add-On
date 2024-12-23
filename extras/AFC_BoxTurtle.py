@@ -44,9 +44,9 @@ class afcBoxTurtle:
 
         # Run test reverse/forward on each lane
         CUR_LANE.extruder_stepper.sync_to_extruder(None)
-        CUR_LANE.move( 5, self.AFC.short_moves_speed, self.AFC.short_moves_accel, True)
-        self.AFC.reactor.pause(self.AFC.reactor.monotonic() + delay)
-        CUR_LANE.move( -5, self.AFC.short_moves_speed, self.AFC.short_moves_accel, True)
+        # CUR_LANE.move( 5, self.AFC.short_moves_speed, self.AFC.short_moves_accel, True)
+        # self.AFC.reactor.pause(self.AFC.reactor.monotonic() + delay)
+        # CUR_LANE.move( -5, self.AFC.short_moves_speed, self.AFC.short_moves_accel, True)
 
         if CUR_LANE.prep_state == False:
             if CUR_LANE.load_state == False:

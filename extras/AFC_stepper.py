@@ -369,6 +369,50 @@ class AFCExtruderStepper:
 
         if self.remaining_weight < self.empty_spool_weight:
             self.remaining_weight = self.empty_spool_weight  # Ensure weight doesn't drop below empty spool weight
+    
+    def set_loaded(self):
+        self.tool_loaded = True
+        self.AFC.current = self.extruder_obj.lane_loaded = self.name
+        self.status = 'Tooled'
+        self.AFC.SPOOL.set_active_spool(self.spool_id)
+
+    def set_unloaded(self):
+        self.tool_loaded = False
+        self.extruder_obj.lane_loaded = ""
+        self.status = None
+        self.AFC.current = None
+    
+    def enable_buffer(self):
+      """
+      Enable the buffer if `buffer_name` is set.
+      Retrieves the buffer object and calls its `enable_buffer()` method to activate it.
+      """
+      if self.buffer_obj is not None:
+         self.buffer_obj.enable_buffer()
+
+    def disable_buffer(self):
+       """
+       Disable the buffer if `buffer_name` is set.
+       Calls the buffer's `disable_buffer()` method to deactivate it.
+       """
+       if self.buffer_obj is not None:
+          self.buffer_obj.disable_buffer()
+
+    def buffer_status(self):
+       """
+       Retrieve the current status of the buffer.
+       If `buffer_name` is set, returns the buffer's status using `buffer_status()`.
+       Otherwise, returns None.
+       """
+       if self.buffer_obj is not None:
+          return self.buffer_obj.buffer_status()
+
+       else: return None
+    
+    def get_trailing(self):
+        if self.buffer_obj is not None:
+            return self.buffer_obj.trailing_state
+
 
 def load_config_prefix(config):
     return AFCExtruderStepper(config)
