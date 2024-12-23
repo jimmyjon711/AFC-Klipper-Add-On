@@ -356,7 +356,7 @@ class afc:
             status = self.get_status(0)
             f.write(json.dumps(status, indent=4))
         with open(self.VarFile+ '.tool', 'w') as f:
-            f.write(json.dumps(self.extruders, indent=4))
+            f.write(json.dumps(status['system']['extruders'], indent=4))
 
     cmd_HUB_CUT_TEST_help = "Test the cutting sequence of the hub cutter, expects LANE=legN"
     def cmd_HUB_CUT_TEST(self, gcmd):
