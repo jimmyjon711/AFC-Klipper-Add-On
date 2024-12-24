@@ -278,12 +278,11 @@ class afcSpool:
         USAGE: RESET_AFC_MAPPING
         """
         t_index = 0
-        for key, unit in self.AFC.lanes.items():
+        for key, unit in self.AFC.units.items():
             for lane in unit:
                 map_cmd = "T{}".format(t_index)
                 self.AFC.tool_cmds[map_cmd] = lane
-                self.AFC.lanes[key][lane]['map']=map_cmd
-                self.printer.lookup_object('AFC_stepper ' + lane).map = map_cmd
+                self.stepper[lane].map = map_cmd
                 t_index += 1
 
         self.AFC.save_vars()
