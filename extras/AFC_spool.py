@@ -267,7 +267,7 @@ class afcSpool:
         CUR_LANE.runout_lane = runout
         self.AFC.save_vars()
         self.gcode.respond_info("This is a feature WIP. Not functioning yet")
-    
+
     cmd_RESET_AFC_MAPPING_help = "Resets all lane mapping in AFC"
     def cmd_RESET_AFC_MAPPING(self, gcmd):
         """
