@@ -308,6 +308,12 @@ class AFCExtruderStepper:
                         self.status=''
                         break
                 self.status=''
+
+                # Checking if loaded to hub(it should not be since filament was just inserted), if false load to hub. Does a fast load if hub distance is over 200mm
+                if not self.loaded_to_hub and self.load_state and self.prep_state:
+                    self.move(self.dist_hub, self.dist_hub_move_speed, self.dist_hub_move_accel, self.dist_hub > 200)
+                    self.loaded_to_hub = True
+
                 self.do_enable(False)
                 if self.load_state == True and self.prep_state == True:
                     self.status = 'Loaded'
@@ -332,6 +338,7 @@ class AFCExtruderStepper:
             else:
                 self.status = None
                 self.AFC.afc_led(self.AFC.led_not_ready, led)
+        self.AFC.save_vars()
 
     def do_enable(self, enable):
         self.sync_print_time()
