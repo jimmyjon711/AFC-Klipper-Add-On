@@ -68,6 +68,7 @@ class AFCExtruderStepper:
         self.weight = None
         self.runout_lane = 'NONE'
         self.status = None
+        self.extruder_temp = None                                                                   # Extruder temp based off material
         unit = config.get('unit')                                                             # Unit name(AFC_hub) that this lane belongs to.
         self.unit = unit.split(':')[0]
         self.index = int(unit.split(':')[1])

@@ -52,6 +52,8 @@ class afc:
         self.speed = 25.
         self.absolute_coord = True
 
+        self.default_material_temps = config.getlists("default_material_temps", None)
+
         # SPOOLMAN
         self.spoolman_ip = config.get('spoolman_ip', None)                          # To utilize spoolman enter spoolmans IP address
         self.spoolman_port = config.get('spoolman_port', None)                      # To utilize spoolman enter spoolmans port
@@ -379,6 +381,43 @@ class afc:
         with open(self.VarFile+ '.tool', 'w') as f:
             f.write(json.dumps(status['system']['extruders'], indent=4))
 
+    def _get_default_material_temps(self, CUR_LANE):
+        """
+        Helper function to get material temperatures
+
+        Defaults to min extrude temperature + 5 if nothing is found.
+
+        Returns value that user has inputted if using spoolman, or tries to parse manually entered values
+        in AFC.cfg and sees if a temperature exists for filament material.
+
+        :param CUR_LANE: Current lane object
+        :return float: Returns float for temperature to heat extruder to
+        """
+        temp_value = self.heater.min_extrude_temp + 5
+        if CUR_LANE.extruder_temp is not None:
+            temp_value = CUR_LANE.extruder_temp
+        elif self.default_material_temps is not None:
+            for mat in self.default_material_temps:
+                m = mat.split(":")
+                if m[0] in CUR_LANE.material:
+                    temp_value = m[1]
+                    break
+        return float(temp_value)
+
+    def _check_extruder_temp(self, CUR_LANE):
+        """
+        Helper function that check to see if extruder needs to be heated, and wait for hotend to get to temp if needed
+        """
+        extruder = self.toolhead.get_extruder()
+        self.heater = extruder.get_heater()
+
+        pheaters = self.printer.lookup_object('heaters')
+        target_temp = self._get_default_material_temps(CUR_LANE)
+
+        if self.heater.target_temp <= target_temp:
+            self.gcode.respond_info('Extruder below min_extrude_temp or below temp for specified filament, heating to {} degrees.'.format(target_temp))
+            pheaters.set_temperature(extruder.get_heater(), target_temp, wait=True)
+
     cmd_HUB_CUT_TEST_help = "Test the cutting sequence of the hub cutter, expects LANE=legN"
     def cmd_HUB_CUT_TEST(self, gcmd):
         """
@@ -605,9 +644,6 @@ class afc:
         # Lookup extruder and hub objects associated with the lane.
         CUR_HUB = CUR_LANE.hub_obj
         CUR_EXTRUDER = CUR_LANE.extruder_obj
-        # Prepare extruder and heater.
-        extruder = self.toolhead.get_extruder()
-        self.heater = extruder.get_heater()
 
         # Set the lane status to 'loading' and activate the loading LED.
         CUR_LANE.status = 'Tool Loading'
@@ -616,12 +652,8 @@ class afc:
 
         # Check if the lane is in a state ready to load and hub is clear.
         if CUR_LANE.load_state and not CUR_HUB.state:
-            # Heat the extruder if it is below the minimum extrusion temperature.
-            if not self.heater.can_extrude:
-                pheaters = self.printer.lookup_object('heaters')
-                if self.heater.target_temp <= self.heater.min_extrude_temp:
-                    self.gcode.respond_info('Extruder below min_extrude_temp, heating to 5 degrees above min.')
-                    pheaters.set_temperature(extruder.get_heater(), self.heater.min_extrude_temp + 5, wait=True)
+
+            self._check_extruder_temp(CUR_LANE)
 
             # Enable the lane for filament movement.
             CUR_LANE.do_enable(True)
@@ -776,6 +808,8 @@ class afc:
         CUR_HUB = CUR_LANE.hub_obj
         CUR_EXTRUDER = CUR_LANE.extruder_obj
 
+		self._check_extruder_temp(CUR_LANE)
+
         # Quick pull to prevent oozing.
         pos = self.toolhead.get_position()
         pos[3] -= 2
@@ -787,9 +821,6 @@ class afc:
         self.toolhead.manual_move(pos, CUR_EXTRUDER.tool_unload_speed)
         self.toolhead.wait_moves()
 
-        # Prepare the extruder and heater for unloading.
-        extruder = self.toolhead.get_extruder()
-        self.heater = extruder.get_heater()
         # Disable the buffer if it's active.
         CUR_EXTRUDER.disable_buffer()
 
@@ -799,13 +830,6 @@ class afc:
         if CUR_LANE.extruder_stepper.motion_queue != CUR_LANE.extruder_name:
             # Synchronize the extruder stepper with the lane.
             CUR_LANE.sync_to_extruder()
-
-        # Check and set the extruder temperature if below the minimum.
-        wait = True
-        pheaters = self.printer.lookup_object('heaters')
-        if self.heater.target_temp <= self.heater.min_extrude_temp:
-            self.gcode.respond_info('Extruder below min_extrude_temp, heating to 5 degrees above min.')
-            pheaters.set_temperature(extruder.get_heater(), self.heater.min_extrude_temp + 5, wait)
 
         # Enable the lane for unloading operations.
         CUR_LANE.do_enable(True)
