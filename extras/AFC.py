@@ -36,6 +36,8 @@ class afc:
         self.buffers = {}
         self.tool_cmds={}
         self.monitoring = False
+        self.number_of_toolchanges  = 0
+        self.current_toolchange     = 0
 
         self.unit_order_list = config.get('unit_order_list','')
 
@@ -162,6 +164,7 @@ class afc:
         self.gcode.register_command('HUB_CUT_TEST', self.cmd_HUB_CUT_TEST, desc=self.cmd_HUB_CUT_TEST_help)
         self.gcode.register_mux_command('SET_BOWDEN_LENGTH', 'AFC', None, self.cmd_SET_BOWDEN_LENGTH, desc=self.cmd_SET_BOWDEN_LENGTH_help)
         self.gcode.register_command('AFC_STATUS', self.cmd_AFC_STATUS, desc=self.cmd_AFC_STATUS_help)
+        self.gcode.register_command('SET_AFC_TOOLCHANGES', self.cmd_SET_AFC_TOOLCHANGES, desc=self.cmd_SET_AFC_TOOLCHANGES_help)
         self.gcode.register_mux_command('CALIBRATE_AFC', None, None, self.cmd_CALIBRATE_AFC, desc=self.cmd_CALIBRATE_AFC_help)
     
     def _handle_ready(self):
@@ -179,6 +182,36 @@ class afc:
         git_hash = subprocess.check_output(['git', '-C', '{}'.format(afc_dir), 'rev-parse', '--short', 'HEAD']).decode('ascii').strip()
         git_commit_num = subprocess.check_output(['git', '-C', '{}'.format(afc_dir), 'rev-list', 'HEAD', '--count']).decode('ascii').strip()
         self.gcode.respond_info("AFC Version: v{}-{}-{}".format(AFC_VERSION, git_commit_num, git_hash))
+
+    cmd_SET_AFC_TOOLCHANGES_help = "Sets number of toolchanges for AFC to keep track of"
+    def cmd_SET_AFC_TOOLCHANGES(self, gcmd):
+        """
+        This macro can be used to set total number of toolchanges from slicer. AFC will keep track of tool changes and print out
+        current tool change number when a T(n) command is called from gcode
+
+        This call can be added to the slicer by adding the following lines to Change filament G-code section in your slicer.
+        You may already have `T[next_extruder]`, just make sure the toolchange call is after your T(n) call
+        ```
+        T[next_extruder]
+        { if toolchange_count == 1 }SET_AFC_TOOLCHANGES TOOLCHANGES=[total_toolchanges]{endif }
+        ```
+
+        The following can also be added to your `PRINT_END` section in your slicer to set number of toolchanges back to zero
+        `SET_AFC_TOOLCHANGES TOOLCHANGES=0`
+
+        Usage: `SET_AFC_TOOLCHANGES TOOLCHANGES=<number>`
+        Example: `SET_AFC_TOOLCHANGES TOOLCHANGES=100`
+
+        Args:
+            gcmd: The G-code command object containing the parameters for the command.
+
+        Returns:
+            None
+        """
+        self.number_of_toolchanges  = gcmd.get_int("TOOLCHANGES")
+        self.current_toolchange     = 0 # Reset back to one
+        if self.number_of_toolchanges > 0: 
+            self.gcode.respond_info("Total number of toolchanges set to {}".format(self.number_of_toolchanges))
 
     cmd_AFC_STATUS_help = "Return current status of AFC"
     def cmd_AFC_STATUS(self, gcmd):
@@ -808,7 +841,7 @@ class afc:
         CUR_HUB = CUR_LANE.hub_obj
         CUR_EXTRUDER = CUR_LANE.extruder_obj
 
-		self._check_extruder_temp(CUR_LANE)
+        self._check_extruder_temp(CUR_LANE)
 
         # Quick pull to prevent oozing.
         pos = self.toolhead.get_position()
@@ -1011,6 +1044,10 @@ class afc:
                 # Log the tool change operation for debugging or informational purposes.
                 self.gcode.respond_info("Tool Change - {} -> {}".format(self.current, lane))
 
+                if not self.error_state and self.number_of_toolchanges != 0 and self.current_toolchange != self.number_of_toolchanges:
+                    self.current_toolchange += 1
+                    self.gcode.respond_raw("//      Change {} out of {}".format(self.current_toolchange, self.number_of_toolchanges))
+
                 # If a current lane is loaded, unload it first.
                 if self.current is not None:
                     if self.current not in self.lanes:
@@ -1035,6 +1072,9 @@ class afc:
                 self.in_toolchange = False
         else:
             self.gcode.respond_info("{} already loaded".format(lane))
+
+            if not self.error_state and self.number_of_toolchanges != 0 and self.current_toolchange != self.number_of_toolchanges:
+                self.current_toolchange += 1
 
     def get_filament_status(self, CUR_LANE):
         if CUR_LANE.prep_state:
