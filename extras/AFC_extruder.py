@@ -3,6 +3,7 @@
 # Copyright (C) 2024 Armored Turtle
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
+from extras.AFC import add_filament_switch
 
 class AFCextruder:
     def __init__(self, config):
@@ -22,6 +23,7 @@ class AFCextruder:
         self.lane_loaded = None
         self.buffer_name = config.get('buffer', None)
         self.buffer = None
+		self.enable_sensors_in_gui = config.getboolean("enable_sensors_in_gui", self.AFC.enable_sensors_in_gui)
 
         ppins = self.printer.lookup_object('pins')
         self.gcode = self.printer.lookup_object('gcode')
@@ -47,12 +49,19 @@ class AFCextruder:
                 self.buffer_trailing = False
                 buttons.register_buttons([self.advance_pin], self.tool_start_callback)
                 buttons.register_buttons([self.trailing_pin], self.buffer_trailing_callback)
+                if self.enable_sensors_in_gui:
+                    self.tool_start_filament_switch_name = "filament_switch_sensor {}".format("tool_start")
+                    self.fila_tool_start = add_filament_switch(self.tool_start_filament_switch_name, self.tool_start, self.printer )
+
         else:
             self.tool_start_state = False
             buttons.register_buttons([self.tool_start], self.tool_start_callback)
         if self.tool_end is not None:
             self.tool_end_state = False
             buttons.register_buttons([self.tool_end], self.tool_end_callback)
+            if self.enable_sensors_in_gui:
+                self.tool_end_state_filament_switch_name = "filament_switch_sensor {}".format("tool_end")
+                self.fila_avd = add_filament_switch(self.tool_end_state_filament_switch_name, self.tool_end, self.printer )
 
     def _handle_ready(self):
        self.AFC.tools[self.name] = self

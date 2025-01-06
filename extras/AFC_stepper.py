@@ -8,6 +8,8 @@ import math
 import chelper
 from kinematics import extruder
 from . import AFC_assist
+from configfile import error
+from extras.AFC import add_filament_switch
 
 #LED
 BACKGROUND_PRIORITY_CLOCK = 0x7fffffff00000000
@@ -152,6 +154,17 @@ class AFCExtruderStepper:
 
         # Get and save base rotation dist
         self.base_rotation_dist = self.extruder_stepper.stepper.get_rotation_distance()[0]
+        self.enable_sensors_in_gui = config.getboolean("enable_sensors_in_gui", self.AFC.enable_sensors_in_gui)
+        self.sensor_to_show = config.get("sensor_to_show", None)
+
+        if self.enable_sensors_in_gui:
+            if self.sensor_to_show is None or self.sensor_to_show == 'prep':
+                self.prep_filament_switch_name = "filament_switch_sensor {}_prep".format(self.name)
+                self.fila_prep = add_filament_switch(self.prep_filament_switch_name, self.prep, self.printer )
+
+            if self.sensor_to_show is None or self.sensor_to_show == 'load':
+                self.load_filament_switch_name = "filament_switch_sensor {}_load".format(self.name)
+                self.fila_load = add_filament_switch(self.load_filament_switch_name, self.load, self.printer )
 
     def handle_connect(self):
         """

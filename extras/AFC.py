@@ -110,6 +110,7 @@ class afc:
 
         self.global_print_current = config.getfloat("global_print_current", None)   # Global variable to set steppers current to a specified current when printing. Going lower than 0.6 may result in TurtleNeck buffer's not working correctly
 
+        self.enable_sensors_in_gui = config.getboolean("enable_sensors_in_gui", False)
         self._update_trsync(config)
 
         # Get debug and cast to boolean
@@ -841,6 +842,7 @@ class afc:
         CUR_HUB = CUR_LANE.hub_obj
         CUR_EXTRUDER = CUR_LANE.extruder_obj
 
+        # Prepare the extruder and heater for unloading.
         self._check_extruder_temp(CUR_LANE)
 
         # Quick pull to prevent oozing.
@@ -1426,5 +1428,30 @@ class afc:
         msg +='\n<span class=info--text>Update values in [' + rawsection +']</span>'
         self.gcode.respond_info(msg)
 
+def add_filament_switch( switch_name, switch_pin, printer ):
+    """
+    Helper function to register pins as filament switch sensor so it will show up in web guis
+
+    :param switch_name: Name of switch to register, should be in the following format: `filament_switch_sensor <name>`
+    :param switch_pin: Pin to add to config for switch
+    :param printer: printer object
+
+    :return returns filament_switch_sensor object
+    """
+    import configparser
+    import configfile
+    ppins = printer.lookup_object('pins')
+    ppins.allow_multi_use_pin(switch_pin.strip("!^"))
+    filament_switch_config = configparser.RawConfigParser()
+    filament_switch_config.add_section( switch_name )
+    filament_switch_config.set( switch_name, 'switch_pin', switch_pin)
+
+    cfg_wrap = configfile.ConfigWrapper( printer, filament_switch_config, {}, switch_name)
+
+    fila = printer.load_object(cfg_wrap, switch_name)
+    fila.runout_helper.sensor_enabled = False
+    fila.runout_helper.runout_pause = False
+
+    return fila
 def load_config(config):
     return afc(config)

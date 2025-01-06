@@ -5,6 +5,7 @@
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
 from configparser import Error as error
+from extras.AFC import add_filament_switch
 
 ADVANCE_STATE_NAME = "Trailing"
 TRAILING_STATE_NAME = "Advancing"
@@ -28,6 +29,7 @@ class AFCtrigger:
 
         self.debug = config.getboolean("debug", False)
         self.buttons = self.printer.load_object(config, "buttons")
+        self.enable_sensors_in_gui = config.getboolean("enable_sensors_in_gui", self.AFC.enable_sensors_in_gui)
 
         # LED SETTINGS
         self.led_index = config.get('led_index', None)
@@ -58,6 +60,13 @@ class AFCtrigger:
             self.multiplier_high = config.getfloat("multiplier_high", default=1.1, minval=1.0)
             self.multiplier_low = config.getfloat("multiplier_low", default=0.9, minval=0.0, maxval=1.0)
             self.velocity = config.getfloat('velocity', 0)
+
+            if self.enable_sensors_in_gui:
+                self.adv_filament_switch_name = "filament_switch_sensor {}_{}".format(self.name, "expanded")
+                self.fila_avd = add_filament_switch(self.adv_filament_switch_name, self.advance_pin, self.printer )
+
+                self.trail_filament_switch_name = "filament_switch_sensor {}_{}".format(self.name, "compressed")
+                self.fila_trail = add_filament_switch(self.trail_filament_switch_name, self.trailing_pin, self.printer )
 
         # Pull config for Belay style buffer (single switch)
         elif self.buffer_distance is not None:
