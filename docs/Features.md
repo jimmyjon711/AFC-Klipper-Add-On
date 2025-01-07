@@ -22,3 +22,12 @@ Enabling lower current during printing can be enabled two ways:
 2. Set `print_current` for each AFC_stepper, this will override `global_print_current` in AFC.cfg
 
 During testing it was found that 0.6A worked well during printing and kept the steppers warms to the touch. Would not suggest going lower than this or the TurtleNeck buffers may not work as intended.
+
+## Enabling switches to show up in mainsail/fluidd guis
+AFC has the ability to add sensors as filament switches so they show up in mainsail/fluidd web gui. This can either be enabled globally by adding/uncommenting `enable_sensors_in_gui: True` in AFC.cfg file or enabled/disabled in individual sections in your config file. Enabling this globally us usefull for debugging purposes, but setting in individual sections will override the global setting
+
+AFC_buffer, AFC_extruder, AFC_hub, and AFC_stepper sections in your AFC_hardware.cfg or AFC_Turtle(n).cfg have the ability to enable sensor by adding `enable_sensors_in_gui: True`. There is an extra config value for AFC_stepper to allow you to either show both sensors or just prep/load sensors by using `sensor_to_show: prep` or `sensor_to_show: load`, leaving out sensor_to_show will show both sensors.
+
+## Tool change count
+
+## Setting extruder temp
