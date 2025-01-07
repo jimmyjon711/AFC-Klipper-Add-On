@@ -54,7 +54,7 @@ class afc:
         self.speed = 25.
         self.absolute_coord = True
 
-        self.default_material_temps = config.getlists("default_material_temps", None)
+        self.default_material_temps = config.getlists("default_material_temps", None) # Default temperature to set extruder when loading/unloading lanes. Material needs to be either manually set or uses material from spoolman if extruder temp is not set in spoolman.
 
         # SPOOLMAN
         self.spoolman_ip = config.get('spoolman_ip', None)                          # To utilize spoolman enter spoolmans IP address
@@ -110,7 +110,7 @@ class afc:
 
         self.global_print_current = config.getfloat("global_print_current", None)   # Global variable to set steppers current to a specified current when printing. Going lower than 0.6 may result in TurtleNeck buffer's not working correctly
 
-        self.enable_sensors_in_gui = config.getboolean("enable_sensors_in_gui", False)
+        self.enable_sensors_in_gui = config.getboolean("enable_sensors_in_gui", False) # Set to True to show all sensor switches as filament sensors in mainsail/fluidd gui
         self._update_trsync(config)
 
         # Get debug and cast to boolean

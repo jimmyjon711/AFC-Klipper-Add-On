@@ -32,7 +32,7 @@ class afc_hub:
             self.state = False
             buttons.register_buttons([self.switch_pin], self.switch_pin_callback)
 
-        self.enable_sensors_in_gui = config.getboolean("enable_sensors_in_gui", self.AFC.enable_sensors_in_gui)
+        self.enable_sensors_in_gui = config.getboolean("enable_sensors_in_gui", self.AFC.enable_sensors_in_gui) # Set to True to show hub sensors switches as filament sensor in mainsail/fluidd gui, overrides value set in AFC.cfg
 
         if self.enable_sensors_in_gui:
             self.filament_switch_name = "filament_switch_sensor {}_Hub".format(self.name)

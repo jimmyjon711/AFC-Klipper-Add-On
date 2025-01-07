@@ -59,7 +59,7 @@ class AFCExtruderStepper:
         #stored status variables
         self.name = config.get_name().split()[-1]
         self.fullname = config.get_name()
-        self.extruder_name = config.get('extruder')
+        self.extruder_name = config.get('extruder')                                                 # AFC_extruder name in config file
         self.extruder_obj = None
         self.map = config.get('cmd','NONE')
         self.tool_loaded = False
@@ -71,7 +71,7 @@ class AFCExtruderStepper:
         self.runout_lane = 'NONE'
         self.status = None
         self.extruder_temp = None                                                                   # Extruder temp based off material
-        unit = config.get('unit')                                                             # Unit name(AFC_hub) that this lane belongs to.
+        unit = config.get('unit')                                                                   # Unit name(AFC_hub) that this lane belongs to.
         self.unit = unit.split(':')[0]
         self.index = int(unit.split(':')[1])
 
@@ -85,14 +85,17 @@ class AFCExtruderStepper:
         self.led_unloading = config.get('led_unloading',None)
         self.led_tool_loaded = config.get('led_tool_loaded',None)
 
-        self.long_moves_speed = config.getfloat("long_moves_speed", None)            # Speed in mm/s to move filament when doing long moves
-        self.long_moves_accel = config.getfloat("long_moves_accel", None)            # Acceleration in mm/s squared when doing long moves
-        self.short_moves_speed = config.getfloat("short_moves_speed", None)           # Speed in mm/s to move filament when doing short moves
-        self.short_moves_accel = config.getfloat("short_moves_accel", None)          # Acceleration in mm/s squared when doing short moves
-        self.short_move_dis = config.getfloat("short_move_dis", None)                 # Move distance in mm for failsafe moves.
+        self.long_moves_speed = config.getfloat("long_moves_speed", None)                           # Speed in mm/s to move filament when doing long moves
+        self.long_moves_accel = config.getfloat("long_moves_accel", None)                           # Acceleration in mm/s squared when doing long moves
+        self.short_moves_speed = config.getfloat("short_moves_speed", None)                         # Speed in mm/s to move filament when doing short moves
+        self.short_moves_accel = config.getfloat("short_moves_accel", None)                         # Acceleration in mm/s squared when doing short moves
+        self.short_move_dis = config.getfloat("short_move_dis", None)                               # Move distance in mm for failsafe moves.
 
         self.hub = config.get('hub',None)
         self.buffer = config.get('buffer',None)
+
+        self.enable_sensors_in_gui = config.getboolean("enable_sensors_in_gui", self.AFC.enable_sensors_in_gui) # Set to True to show prep and load sensors switches as filament sensors in mainsail/fluidd gui, overrides value set in AFC.cfg
+        self.sensor_to_show = config.get("sensor_to_show", None)                                    # Set to prep to only show prep sensor, set to load to only show load sensor. Do no add if you want both prep and load sensors to show in web gui
         
         self.motion_queue = None
         self.next_cmd_time = 0.
@@ -154,8 +157,6 @@ class AFCExtruderStepper:
 
         # Get and save base rotation dist
         self.base_rotation_dist = self.extruder_stepper.stepper.get_rotation_distance()[0]
-        self.enable_sensors_in_gui = config.getboolean("enable_sensors_in_gui", self.AFC.enable_sensors_in_gui)
-        self.sensor_to_show = config.get("sensor_to_show", None)
 
         if self.enable_sensors_in_gui:
             if self.sensor_to_show is None or self.sensor_to_show == 'prep':

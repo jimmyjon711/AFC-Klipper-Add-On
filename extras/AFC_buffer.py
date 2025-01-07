@@ -27,9 +27,9 @@ class AFCtrigger:
         self.current = ''
         
 
-        self.debug = config.getboolean("debug", False)
+        self.debug = config.getboolean("debug", False)                                                          # Set to True to enable buffer debug messages
         self.buttons = self.printer.load_object(config, "buttons")
-        self.enable_sensors_in_gui = config.getboolean("enable_sensors_in_gui", self.AFC.enable_sensors_in_gui)
+        self.enable_sensors_in_gui = config.getboolean("enable_sensors_in_gui", self.AFC.enable_sensors_in_gui) # Set to True to show advancing(extended) and trailing(compressed) sensors switches as filament sensors in mainsail/fluidd gui, overrides value set in AFC.cfg
 
         # LED SETTINGS
         self.led_index = config.get('led_index', None)

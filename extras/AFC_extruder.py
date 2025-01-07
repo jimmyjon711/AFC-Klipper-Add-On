@@ -23,7 +23,7 @@ class AFCextruder:
         self.lane_loaded = None
         self.buffer_name = config.get('buffer', None)
         self.buffer = None
-		self.enable_sensors_in_gui = config.getboolean("enable_sensors_in_gui", self.AFC.enable_sensors_in_gui)
+        self.enable_sensors_in_gui = config.getboolean("enable_sensors_in_gui", self.AFC.enable_sensors_in_gui) # Set to True to show toolhead sensors switches as filament sensors in mainsail/fluidd gui, overrides value set in AFC.cfg
 
         ppins = self.printer.lookup_object('pins')
         self.gcode = self.printer.lookup_object('gcode')
