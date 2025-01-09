@@ -36,9 +36,8 @@ class afcError:
         return error_handled
 
     def ToolHeadFix(self, CUR_LANE):
-        CUR_EXTRUDER = self.printer.lookup_object('AFC_extruder ' + CUR_LANE.extruder_name)
-        if CUR_EXTRUDER.tool_start_state:   #toolhead has filament
-            if self.AFC.extruders[CUR_LANE.extruder_name]['lane_loaded'] == CUR_LANE.name:   #var has right lane loaded
+        if CUR_LANE.get_toolhead_sensor_state():   #toolhead has filament
+            if CUR_LANE.extruder_obj.lane_loaded == CUR_LANE.name:   #var has right lane loaded
                 if CUR_LANE.load_state == False: #Lane has filament
                     self.PauseUserIntervention('Filament not loaded in Lane')
                 else:

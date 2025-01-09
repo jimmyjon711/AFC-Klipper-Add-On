@@ -1,4 +1,5 @@
 from configparser import Error as error
+from extras.AFC import add_filament_switch
 
 class afc_hub:
     def __init__(self, config):
@@ -6,7 +7,9 @@ class afc_hub:
         self.printer.register_event_handler("klippy:connect", self.handle_connect)
         self.AFC = self.printer.lookup_object('AFC')
         self.name = config.get_name().split()[-1]
-        self.fullname = config.get_name()
+
+        self.unit = None
+
         # HUB Cut variables
         # Next two variables are used in AFC
         self.cut = config.getboolean("cut", False)
@@ -31,13 +34,18 @@ class afc_hub:
             self.state = False
             buttons.register_buttons([self.switch_pin], self.switch_pin_callback)
 
+        self.enable_sensors_in_gui = config.getboolean("enable_sensors_in_gui", self.AFC.enable_sensors_in_gui)
+
+        if self.enable_sensors_in_gui:
+            self.filament_switch_name = "filament_switch_sensor {}_Hub".format(self.name)
+            self.fila = add_filament_switch(self.filament_switch_name, self.switch_pin, self.printer )
+
     def handle_connect(self):
         """
         Handle the connection event.
         This function is called when the printer connects. It looks up AFC info
         and assigns it to the instance variable `self.AFC`.
         """
-        self.AFC.hubs[self.name] = self
         self.gcode = self.AFC.gcode
         self.reactor = self.AFC.reactor
         self.AFC.hubs[self.name]=self

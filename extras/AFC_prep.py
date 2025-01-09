@@ -105,8 +105,8 @@ class afcPrep:
                     return
                 self.AFC.gcode.respond_info(CUR_UNIT.type + ' ' + UNIT +' Prepping lanes')
                 LaneCheck = True
-                for LANE in CUR_UNIT.lanes:
-                    if not CUR_UNIT.system_Test(LANE, self.delay, self.assignTcmd):
+            for LANE in unit.lanes.values():
+                if not unit.system_Test(LANE, self.delay, self.assignTcmd, self.enable):
                         LaneCheck = False
                 if LaneCheck:
                     self.AFC.gcode.respond_raw(CUR_UNIT.logo)
@@ -124,6 +124,8 @@ class afcPrep:
         # Setting value to False so the T commands do try to get reassigned when users manually
         #   run PREP after it has already be ran once upon boot
         self.assignTcmd = False
+
+        self.AFC.save_vars()
 
 def load_config(config):
     return afcPrep(config)

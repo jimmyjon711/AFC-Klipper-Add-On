@@ -20,17 +20,28 @@ class afcSpool:
         self.ERROR = self.AFC.ERROR
         self.reactor = self.AFC.reactor
         self.gcode = self.AFC.gcode
-
-        self.gcode.register_mux_command('SET_COLOR',None,None, self.cmd_SET_COLOR, desc=self.cmd_SET_COLOR_help)
-        self.gcode.register_mux_command('SET_WEIGHT',None,None, self.cmd_SET_WEIGHT, desc=self.cmd_SET_WEIGHT_help)
-        self.gcode.register_mux_command('SET_MATERIAL',None,None, self.cmd_SET_MATERIAL, desc=self.cmd_SET_MATERIAL_help)
-        self.gcode.register_mux_command('SET_SPOOL_ID',None,None, self.cmd_SET_SPOOL_ID, desc=self.cmd_SET_SPOOL_ID_help)
-        self.gcode.register_mux_command('SET_RUNOUT',None,None, self.cmd_SET_RUNOUT, desc=self.cmd_SET_RUNOUT_help)
-        self.gcode.register_mux_command('SET_MAP',None,None, self.cmd_SET_MAP, desc=self.cmd_SET_MAP_help)
+        
+        # Registering stepper callback so that mux macro can be set properly with valid lane names
+        self.printer.register_event_handler("afc_stepper:register_macros",self.register_lane_macros)
+        
         self.gcode.register_command("RESET_AFC_MAPPING", self.cmd_RESET_AFC_MAPPING, desc=self.cmd_RESET_AFC_MAPPING_help)
 
         self.URL = 'http://{}:{}/api/v1/spool/'.format(self.AFC.spoolman_ip, self.AFC.spoolman_port)
 
+    def register_lane_macros(self, lane_obj):
+        """
+        Callback function to register macros with proper lane names so that klipper errors out correctly when users supply lanes that 
+        are not valid
+
+        :param lane_obj: object for lane to register
+        """
+        self.gcode.register_mux_command('SET_COLOR',    "LANE", lane_obj.name, self.cmd_SET_COLOR,      desc=self.cmd_SET_COLOR_help)
+        self.gcode.register_mux_command('SET_WEIGHT',   "LANE", lane_obj.name, self.cmd_SET_WEIGHT,     desc=self.cmd_SET_WEIGHT_help)
+        self.gcode.register_mux_command('SET_MATERIAL', "LANE", lane_obj.name, self.cmd_SET_MATERIAL,   desc=self.cmd_SET_MATERIAL_help)
+        self.gcode.register_mux_command('SET_SPOOL_ID', "LANE", lane_obj.name, self.cmd_SET_SPOOL_ID,   desc=self.cmd_SET_SPOOL_ID_help)
+        self.gcode.register_mux_command('SET_RUNOUT',   "LANE", lane_obj.name, self.cmd_SET_RUNOUT,     desc=self.cmd_SET_RUNOUT_help)
+        self.gcode.register_mux_command('SET_MAP',      "LANE", lane_obj.name, self.cmd_SET_MAP,        desc=self.cmd_SET_MAP_help)
+        
 
     cmd_SET_MAP_help = "change filaments map"
     def cmd_SET_MAP(self, gcmd):
@@ -66,7 +77,6 @@ class afcSpool:
 
         SW_LANE = self.AFC.lanes[lane_switch]
         self.AFC.tool_cmds[map_switch]=lane_switch
-        SW_LANE.map = map_switch
         SW_LANE.map=map_switch
         self.AFC.save_vars()
 
@@ -183,7 +193,7 @@ class afcSpool:
         based on the information retrieved from the Spoolman API.
 
         Usage: `SET_SPOOL_ID LANE=<lane> SPOOL_ID=<spool_id>`
-        Example: `SET_SPOOL_IDD LANE=leg1 SPOOL_ID=12345`
+        Example: `SET_SPOOL_ID LANE=leg1 SPOOL_ID=12345`
 
         Args:
             gcmd: The G-code command object containing the parameters for the command.
@@ -206,6 +216,12 @@ class afcSpool:
             CUR_LANE = self.AFC.lanes[lane]
             self.set_spoolID(CUR_LANE, SpoolID)
 
+    def _get_filament_values( self, filament, field):
+        value = None
+        if field in filament:
+            value = filament[field]
+        return value
+
     def set_spoolID(self, CUR_LANE, SpoolID, save_vars=True):
         if self.AFC.spoolman_ip !=None:
             if SpoolID !='':
@@ -213,15 +229,18 @@ class afcSpool:
                     url =  "{}{}".format(self.URL, SpoolID)
                     result = json.load(urlopen(url))
                     CUR_LANE.spool_id = SpoolID
-                    CUR_LANE.material = result['filament']['material']
-                    CUR_LANE.color = '#' + result['filament']['color_hex']
-                    if 'remaining_weight' in result: CUR_LANE.weight =  result['remaining_weight']
+                    
+                    CUR_LANE.material       = self._get_filament_values( result['filament'], 'material')
+                    CUR_LANE.weight         = self._get_filament_values( result['filament'], 'remaining_weight')
+                    CUR_LANE.extruder_temp  = self._get_filament_values( result['filament'], 'settings_extruder_temp')
                     # Check to see if filament is defined as multi color and take the first color for now
                     # Once support for multicolor is added this needs to be updated
                     if "multi_color_hexes" in result['filament']:
-                        CUR_LANE.color = '#' + result['filament']['multi_color_hexes'].split(",")[0]
+                        CUR_LANE.color = '#{}'.format( self._get_filament_values( result['filament'], 'multi_color_hexes').split(",")[0] )
                     else:
-                        CUR_LANE.color = '#' + result['filament']['color_hex']
+                        CUR_LANE.color = '#{}'.format( self._get_filament_values( result['filament'], 'color_hex') )
+                    
+                    
                 except Exception as e:
                     self.AFC.ERROR.AFC_error("Error when trying to get Spoolman data for ID:{}, Error: {}".format(SpoolID, e), False)
             else:
@@ -229,7 +248,8 @@ class afcSpool:
                 CUR_LANE.material = ''
                 CUR_LANE.color = ''
                 CUR_LANE.weight = ''
-            save_vars: self.AFC.save_vars()
+                CUR_LANE.extruder_temp = None
+            if save_vars: self.AFC.save_vars()
 
     cmd_SET_RUNOUT_help = "change filaments ID"
     def cmd_SET_RUNOUT(self, gcmd):
@@ -273,7 +293,7 @@ class afcSpool:
         """
         t_index = 0
         for key, unit in self.AFC.units.items():
-            for lane in unit:
+            for lane in unit.lanes:
                 map_cmd = "T{}".format(t_index)
                 self.AFC.tool_cmds[map_cmd] = lane
                 self.AFC.stepper[lane].map = map_cmd

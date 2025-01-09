@@ -5,6 +5,7 @@
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
 from configparser import Error as error
+from extras.AFC import add_filament_switch
 
 ADVANCE_STATE_NAME = "Trailing"
 TRAILING_STATE_NAME = "Advancing"
@@ -13,7 +14,6 @@ class AFCtrigger:
 
     def __init__(self, config):
         self.printer = config.get_printer()
-        self.printer.register_event_handler("klippy:connect", self.handle_connect)
         self.AFC = self.printer.lookup_object('AFC')
         self.reactor = self.AFC.reactor
         self.gcode = self.AFC.gcode
@@ -24,10 +24,12 @@ class AFCtrigger:
         self.last_state = False
         self.enable = False
         self.current = ''
-        
+        self.advance_state = False
+        self.trailing_state = False
 
         self.debug = config.getboolean("debug", False)
         self.buttons = self.printer.load_object(config, "buttons")
+        self.enable_sensors_in_gui = config.getboolean("enable_sensors_in_gui", self.AFC.enable_sensors_in_gui)
 
         # LED SETTINGS
         self.led_index = config.get('led_index', None)
@@ -59,6 +61,13 @@ class AFCtrigger:
             self.multiplier_low = config.getfloat("multiplier_low", default=0.9, minval=0.0, maxval=1.0)
             self.velocity = config.getfloat('velocity', 0)
 
+            if self.enable_sensors_in_gui:
+                self.adv_filament_switch_name = "filament_switch_sensor {}_{}".format(self.name, "expanded")
+                self.fila_avd = add_filament_switch(self.adv_filament_switch_name, self.advance_pin, self.printer )
+
+                self.trail_filament_switch_name = "filament_switch_sensor {}_{}".format(self.name, "compressed")
+                self.fila_trail = add_filament_switch(self.trail_filament_switch_name, self.trailing_pin, self.printer )
+
         # Pull config for Belay style buffer (single switch)
         elif self.buffer_distance is not None:
             self.belay = True
@@ -74,8 +83,8 @@ class AFCtrigger:
             raise error( msg )
 
         self.printer.register_event_handler("klippy:ready", self._handle_ready)
-        self.gcode.register_mux_command("QUERY_BUFFER", "BUFFER", self.name, self.cmd_QUERY_BUFFER, desc=self.cmd_QUERY_BUFFER_help)
-        self.gcode.register_mux_command("SET_BUFFER_VELOCITY", "BUFFER", self.name, self.cmd_SET_BUFFER_VELOCITY, desc=self.cmd_SET_BUFFER_VELOCITY_help)
+        self.gcode.register_mux_command("QUERY_BUFFER",         "BUFFER", self.name, self.cmd_QUERY_BUFFER,         desc=self.cmd_QUERY_BUFFER_help)
+        self.gcode.register_mux_command("SET_BUFFER_VELOCITY",  "BUFFER", self.name, self.cmd_SET_BUFFER_VELOCITY,  desc=self.cmd_SET_BUFFER_VELOCITY_help)
 
         # Belay Buffer
         if self.belay:
@@ -85,16 +94,10 @@ class AFCtrigger:
         if self.turtleneck:
             self.buttons.register_buttons([self.advance_pin], self.advance_callback)
             self.buttons.register_buttons([self.trailing_pin], self.trailing_callback)
-            self.gcode.register_mux_command("SET_ROTATION_FACTOR", "AFC_trigger", None, self.cmd_SET_ROTATION_FACTOR, desc=self.cmd_LANE_ROT_FACTOR_help)
-            self.gcode.register_mux_command("SET_BUFFER_MULTIPLIER", "AFC_trigger", None, self.cmd_SET_MULTIPLIER, desc=self.cmd_SET_MULTIPLIER_help)
 
-    def handle_connect(self):
-        """
-        Handle the connection event.
-        This function is called when the printer connects. It looks up AFC info
-        and assigns it to the instance variable `self.AFC`.
-        """
-        self.AFC.buffers[self.name] = self
+
+            self.gcode.register_mux_command("SET_ROTATION_FACTOR",      "BUFFER", self.name, self.cmd_SET_ROTATION_FACTOR,  desc=self.cmd_LANE_ROT_FACTOR_help)
+            self.gcode.register_mux_command("SET_BUFFER_MULTIPLIER",    "BUFFER", self.name, self.cmd_SET_MULTIPLIER,       desc=self.cmd_SET_MULTIPLIER_help)
 
     def _handle_ready(self):
         self.min_event_systime = self.reactor.monotonic() + 2.
@@ -104,7 +107,7 @@ class AFCtrigger:
         if not self.last_state and state:
             if self.printer.state_message == 'Printer is ready' and self.enable:
                 if self.AFC.current is not None:
-                    CUR_LANE = self.AFC.current
+                    CUR_LANE = self.AFC.lanes[self.AFC.current]
                     CUR_EXTRUDER = self.printer.lookup_object('AFC_extruder ' + CUR_LANE.extruder_name)
                     if CUR_EXTRUDER.tool_start_state:
                         self.belay_move_lane(state)
@@ -117,7 +120,7 @@ class AFCtrigger:
         if state:
             LANE = self.AFC.lanes[self.AFC.current]
             if LANE.status != 'unloading':
-                if self.debug: self.gcode.respond_info("Buffer Triggered, Moving Lane {} forward {}mm".format(self.AFC.current, self.buffer_distance))
+                if self.debug: self.gcode.respond_info("Buffer Triggered, Moving Lane {} forward {}mm".format(LANE.name, self.buffer_distance))
                 LANE.move(self.buffer_distance, self.velocity ,self.accel)
 
     def enable_buffer(self):
@@ -173,6 +176,7 @@ class AFCtrigger:
         self.gcode.respond_info("Rotation distance reset : {}".format(cur_stepper.extruder_stepper.stepper.get_rotation_distance()[0]))
 
     def advance_callback(self, eventime, state):
+        self.advance_state = state
         if self.printer.state_message == 'Printer is ready' and self.enable:
             CUR_LANE = self.AFC.lanes[self.AFC.current]
             if self.AFC.current != None and state:
@@ -184,6 +188,7 @@ class AFCtrigger:
         self.last_state = ADVANCE_STATE_NAME
 
     def trailing_callback(self, eventime, state):
+        self.trailing_state = state
         if self.printer.state_message == 'Printer is ready' and self.enable:
             CUR_LANE = self.AFC.lanes[self.AFC.current]
             if self.AFC.current != None and state:
@@ -335,6 +340,7 @@ class AFCtrigger:
         self.velocity = gcmd.get_float('VELOCITY', 0.0)
         self.gcode.respond_info("VELOCITY for {} was updated from {} to {}".format(self.name, old_velocity, self.velocity))
 
+	#TODO: make sure the responds correctly for mainsail status
     def get_status(self, eventtime=None):
         self.response = {}
         self.response['state'] = self.last_state
