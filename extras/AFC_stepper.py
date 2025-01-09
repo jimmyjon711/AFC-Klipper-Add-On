@@ -9,7 +9,7 @@ import chelper
 from kinematics import extruder
 from . import AFC_assist
 from configfile import error
-from extras.AFC import add_filament_switch
+from extras.AFC_utils import add_filament_switch
 
 #LED
 BACKGROUND_PRIORITY_CLOCK = 0x7fffffff00000000
@@ -88,14 +88,13 @@ class AFCExtruderStepper:
         self.short_moves_speed 	= config.getfloat("short_moves_speed", None)           # Speed in mm/s to move filament when doing short moves
         self.short_moves_accel	= config.getfloat("short_moves_accel", None)           # Acceleration in mm/s squared when doing short moves
         self.short_move_dis 	= config.getfloat("short_move_dis", None)              # Move distance in mm for failsafe moves.
-		
-		# Overrides buffers set at the unit level
+
+        # Overrides buffers set at the unit level
         self.hub 				= config.get('hub',None)
-		# Overrides buffers set at the unit and extruder level
+        # Overrides buffers set at the unit and extruder level
         self.buffer_name = config.get("buffer", None)
-		
-		self.printer.register_event_handler("{}:connect".format(self.unit),self.handle_unit_connect)
-        self.printer.register_event_handler("klippy:ready", self.handle_ready)
+
+        self.printer.register_event_handler("{}:connect".format(self.unit),self.handle_unit_connect)
         
         self.motion_queue = None
         self.next_cmd_time = 0.
@@ -168,7 +167,9 @@ class AFCExtruderStepper:
             if self.sensor_to_show is None or self.sensor_to_show == 'load':
                 self.load_filament_switch_name = "filament_switch_sensor {}_load".format(self.name)
                 self.fila_load = add_filament_switch(self.load_filament_switch_name, self.load, self.printer )
-    def handle_ready(self):
+        self.connect_done = False
+
+    def _handle_ready(self):
         if self.unit_obj is None:
             raise error("Unit {unit} is not defined in your configuration file. Please defined unit ex. [AFC_BoxTurtle {unit}]".format(unit=self.unit))
 
@@ -185,11 +186,10 @@ class AFCExtruderStepper:
         self.AFC.lanes[self.name] = self
 
         # TODO: Need to add error checking
-        if self.hub is None:
-            self.hub_obj = self.unit_obj.hub_array[list(self.unit_obj.hub_array)[0]]
-        else:
+        self.hub_obj = self.unit_obj.hub_obj
+        if self.hub is not None:
             # TODO: manually lookup hub object
-            self.hub_obj = self.unit_obj.hub_array[self.hub]
+            self.hub_obj = self.printer.lookup_object("AFC_hub {}".format(self.hub))
 
         try:
             if self.extruder_name is not None:
@@ -213,8 +213,7 @@ class AFCExtruderStepper:
                 self.buffer_obj = self.printer.lookup_object("AFC_buffer {}".format(self.extruder_obj.buffer_name))
 
         self.AFC.gcode.respond_info("{} Buffer Obj: {}".format(self.name, self.buffer_obj))
-
-        self.restore_prev_state()
+        self.AFC.gcode.respond_info("{} Hub Obj: {}".format(self.name, self.hub_obj))
         
         # Send out event so that macros and be registered properly with valid lane names
         self.printer.send_event("afc_stepper:register_macros", self)
@@ -233,6 +232,8 @@ class AFCExtruderStepper:
         if self.short_moves_speed is None: self.short_moves_speed = self.unit_obj.short_moves_speed          # Speed in mm/s to move filament when doing short moves
         if self.short_moves_accel is None: self.short_moves_accel = self.unit_obj.short_moves_accel        # Acceleration in mm/s squared when doing short moves
         if self.short_move_dis is None: self.short_move_dis = self.unit_obj.short_move_dis                # Move distance in mm for failsafe moves.
+
+        self.connect_done = True
 
     def get_toolhead_sensor_state(self):
         if self.extruder_obj.tool_start == "buffer":
@@ -567,6 +568,7 @@ class AFCExtruderStepper:
 
     def get_status(self, eventtime=None):
         self.response = {}
+        if not self.connect_done: return self.response
         self.response['name'] = self.name
         self.response['unit'] = self.unit
         self.response['hub'] = self.hub_obj.name

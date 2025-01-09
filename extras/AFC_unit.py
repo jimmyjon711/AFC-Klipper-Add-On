@@ -9,14 +9,16 @@ class afcUnit:
         self.full_name  = config.get_name().split()
         self.name       = self.full_name[-1]
         self.screen_mac = config.get('screen_mac', None)
-        self.hub        = config.getlists("hub", None)
-        self.extruder   = config.get("extruder")
+        self.hub        = config.get("hub", None)
+        self.extruder   = config.get("extruder", None)
         self.buffer_name    = config.get('buffer', None)
 
         self.lanes      = {}
 
         # Objects
         self.buffer_obj = None
+        self.hub_obj    = None
+        self.extruder_obj = None
         
         self.led_name =config.get('led_name', self.AFC.led_name)
         self.led_fault =config.get('led_fault', self.AFC.led_fault)
@@ -37,24 +39,20 @@ class afcUnit:
         self.AFC = self.printer.lookup_object('AFC')
         self.AFC.units[self.name] = self
 
-        self.hub_array = {}
+        if self.hub is not None:
+            self.hub_obj = self.printer.lookup_object("AFC_hub {}".format(self.hub))
+            if self.hub_obj.unit is not None:
+                raise error("AFC_hub {} already has a unit {} assigned, can't assign {}. Only one unit can be assigned per AFC_hub".format(self.hub, " ".join(self.hub_obj.unit.full_name), " ".join(self.full_name)))
+            else:
+                self.hub_obj.unit = self
 
-        if self.hub:
-            self.hub_obj = self.printer.lookup_object("AFC_hub {}".format(hub))
-            if h.unit is not None:
-                raise error("AFC_hub {} already has a unit {} assigned, can't assign {}. Only one unit can be assigned per AFC_hub".format(hub, " ".join(h.unit.full_name), " ".join(self.full_name)))
-
-        try:
+        if self.extruder is not None:
             self.extruder_obj = self.printer.lookup_object("AFC_extruder {}".format(self.extruder))
-        except:
-            error_string = 'Error: No config found for extruder: {extruder} in [AFC_unit {unit}]. Please make sure [AFC_extruder {extruder}] section exists in your config'.format(
-                            extruder=self.extruder, unit=self.name )
-            raise error( error_string )
 
         if self.buffer_name is not None:
             self.buffer_obj = self.printer.lookup_object('AFC_buffer {}'.format(self.buffer_name))
 
-        self.AFC.gcode.respond_info("AFC_{}:ready".format(self.name))
+        self.AFC.gcode.respond_info("AFC_{}:ready {} {}".format(self.name, self.hub, self.hub_obj))
 
         # Send out event so lanes can store units object
         self.printer.send_event("{}:connect".format(self.name), self)
@@ -124,6 +122,6 @@ class afcUnit:
         return succeeded
     def get_status(self, eventtime=None):
         self.response = {}
-        self.response['lanes'] = self.lanes # TODO may need to fix this
+        self.response['lanes'] = [lane.name for lane in self.lanes.values()]
 
         return self.response

@@ -5,7 +5,7 @@
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
 from configparser import Error as error
-from extras.AFC import add_filament_switch
+from extras.AFC_utils import add_filament_switch
 
 ADVANCE_STATE_NAME = "Trailing"
 TRAILING_STATE_NAME = "Advancing"

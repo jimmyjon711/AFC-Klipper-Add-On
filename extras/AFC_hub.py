@@ -1,5 +1,5 @@
 from configparser import Error as error
-from extras.AFC import add_filament_switch
+from extras.AFC_utils import add_filament_switch
 
 class afc_hub:
     def __init__(self, config):

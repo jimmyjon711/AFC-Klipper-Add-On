@@ -3,13 +3,14 @@
 # Copyright (C) 2024 Armored Turtle
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
-from extras.AFC import add_filament_switch
+from extras.AFC_utils import add_filament_switch
 
 class AFCextruder:
     def __init__(self, config):
         self.printer = config.get_printer()
         self.printer.register_event_handler("klippy:connect", self.handle_connect)
         buttons = self.printer.load_object(config, "buttons")
+        self.AFC = self.printer.lookup_object('AFC')
 
         self.name = config.get_name().split(' ')[-1]
         self.tool_stn = config.getfloat("tool_stn", 72)
@@ -21,10 +22,13 @@ class AFCextruder:
         self.tool_end = config.get('pin_tool_end', None)
         self.lane_loaded = None
 
+        self.buffer_name = config.get('buffer', None)
+
         ppins = self.printer.lookup_object('pins')
         self.gcode = self.printer.lookup_object('gcode')
         self.enable_sensors_in_gui = config.getboolean("enable_sensors_in_gui", self.AFC.enable_sensors_in_gui)
 
+        self.tool_start_state = False
         if self.tool_start is not None:
             if self.tool_start == "buffer":
                 self.gcode.respond_info("Setting up as buffer")
@@ -46,9 +50,8 @@ class AFCextruder:
         This function is called when the printer connects. It looks up AFC info
         and assigns it to the instance variable `self.AFC`.
         """
-        self.AFC = self.printer.lookup_object('AFC')
         self.reactor = self.AFC.reactor
-		self.AFC.tools[self.name] = self
+        self.AFC.tools[self.name] = self
 
     def tool_start_callback(self, eventtime, state):
         self.tool_start_state = state
