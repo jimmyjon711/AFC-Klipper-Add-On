@@ -3,7 +3,7 @@ from extras.AFC_unit import afcUnit
 class afcBoxTurtle(afcUnit):
     def __init__(self, config):
         super().__init__(config)
-        self.type = "Box_Turtle"
+        self.type = config.get('type', 'Box_Turtle')
 
     def handle_connect(self):
         """

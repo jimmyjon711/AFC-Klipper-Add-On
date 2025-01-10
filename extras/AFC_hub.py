@@ -9,6 +9,7 @@ class afc_hub:
         self.name = config.get_name().split()[-1]
 
         self.unit = None
+        self.lanes = {}
 
         # HUB Cut variables
         # Next two variables are used in AFC
@@ -98,6 +99,7 @@ class afc_hub:
         self.response['cut_servo_pass_angle'] = self.cut_servo_pass_angle
         self.response['cut_servo_clip_angle'] = self.cut_servo_clip_angle
         self.response['cut_servo_prep_angle'] = self.cut_servo_prep_angle
+        self.response['lanes'] = [lane.name for lane in self.lanes.values()]
         
         return self.response
 

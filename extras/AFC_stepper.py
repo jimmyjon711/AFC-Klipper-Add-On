@@ -55,12 +55,14 @@ class AFCExtruderStepper:
         self.reactor = self.printer.get_reactor()
         self.extruder_stepper = extruder.ExtruderStepper(config)
 
+        self.units_obj      = None
+        self.hub_obj        = None
+        self.buffer_obj     = None
+        self.extruder_obj   = None
+
         #stored status variables
         self.name = config.get_name().split()[-1]
         self.fullname = config.get_name()
-        self.extruder_name = config.get('extruder')
-        self.extruder_obj = None
-        self.map = config.get('cmd','NONE')
         self.tool_loaded = False
         self.loaded_to_hub = False
         self.spool_id = None
@@ -69,10 +71,12 @@ class AFCExtruderStepper:
         self.weight = None
         self.runout_lane = 'NONE'
         self.status = None
-        unit = config.get('unit')                                                      # Unit name(AFC_hub) that this lane belongs to.
+        unit                    = config.get('unit')                                   # Unit name(AFC_hub) that this lane belongs to.
         self.unit = unit.split(':')[0]
         self.index = int(unit.split(':')[1])
 
+        self.extruder_name      = config.get('extruder', None)
+        self.map                = config.get('cmd','NONE')
         self.led_index 			= config.get('led_index', None)                        # LED index of lane in chain of lane LEDs
         self.led_name 			= config.get('led_name',None)
         self.led_fault 			= config.get('led_fault',None)
@@ -92,7 +96,9 @@ class AFCExtruderStepper:
         # Overrides buffers set at the unit level
         self.hub 				= config.get('hub',None)
         # Overrides buffers set at the unit and extruder level
-        self.buffer_name = config.get("buffer", None)
+        self.buffer_name        = config.get("buffer", None)
+        self.dist_hub           = config.getfloat('dist_hub', 60)                      # Bowden distance between Boxturtle extruder and hub
+        self.park_dist          = config.getfloat('park_dist', 10)                     # Currently unused
 
         self.printer.register_event_handler("{}:connect".format(self.unit),self.handle_unit_connect)
         
@@ -106,8 +112,6 @@ class AFCExtruderStepper:
             ffi_lib.cartesian_stepper_alloc(b'x'), ffi_lib.free)
         self.assist_activate=False
 
-        self.dist_hub = config.getfloat('dist_hub', 60)                                             # Bowden distance between Boxturtle extruder and hub
-        self.park_dist = config.getfloat('park_dist', 10)                                           # Currently unused
         
         # lane triggers
         buttons = self.printer.load_object(config, "buttons")
@@ -185,38 +189,67 @@ class AFCExtruderStepper:
         self.unit_obj.lanes[self.name] = self
         self.AFC.lanes[self.name] = self
 
-        # TODO: Need to add error checking
         self.hub_obj = self.unit_obj.hub_obj
         if self.hub is not None:
-            # TODO: manually lookup hub object
-            self.hub_obj = self.printer.lookup_object("AFC_hub {}".format(self.hub))
+            try:
+                self.hub_obj = self.printer.lookup_object("AFC_hub {}".format(self.hub))
+            except:
+                error_string = 'Error: No config found for hub: {hub} in [AFC_stepper {stepper}]. Please make sure [AFC_hub {hub}] section exists in your config'.format(
+                hub=self.hub, stepper=self.name )
+                raise error(error_string)
 
-        try:
-            if self.extruder_name is not None:
-                self.extruder_obj = self.printer.lookup_object('AFC_extruder {}'.format(self.extruder_name))
-            else:
-                self.extruder_obj = self.unit_obj.extruder_obj
-            self.extruder_name = self.extruder_obj.name
-        except:
-            error_string = 'Error: No config found for extruder: {extruder} in [AFC_stepper {stepper}]. Please make sure [AFC_extruder {extruder}] section exists in your config'.format(
-                extruder=self.extruder_name, stepper=self.name )
+        # Check to make sure steppers unit has a hub defined, if not error out
+        elif self.hub_obj is None:
+            error_string = "Error: Hub has not been configured for stepper {name}, please add hub variable to either [AFC_stepper {name}] or [AFC_{unit_type} {unit_name}] in your config file".format(
+                            name=self.name, unit_type=self.unit_obj.type.replace("_", ""), unit_name=self.unit_obj.name)
             raise error(error_string)
+
+        # Assigning hub name just in case stepper is using hub defined in units config
+        self.hub = self.hub_obj.name
+        self.hub_obj.lanes[self.name] = self
+
+        self.extruder_obj = self.unit_obj.extruder_obj
+        if self.extruder_name is not None:
+            try:
+                self.extruder_obj = self.printer.lookup_object('AFC_extruder {}'.format(self.extruder_name))
+            except:
+                error_string = 'Error: No config found for extruder: {extruder} in [AFC_stepper {stepper}]. Please make sure [AFC_extruder {extruder}] section exists in your config'.format(
+                    extruder=self.extruder_name, stepper=self.name )
+                raise error(error_string)
+        elif self.extruder_obj is None:
+            error_string = "Error: Extruder has not been configured for stepper {name}, please add extruder variable to either [AFC_stepper {name}] or [AFC_{unit_type} {unit_name}] in your config file".format(
+                        name=self.name, unit_type=self.unit_obj.type.replace("_", ""), unit_name=self.unit_obj.name)
+            raise error(error_string)
+        
+        # Assigning extruder name just in case stepper is using extruder defined in units config
+        self.extruder_name = self.extruder_obj.name
+        self.extruder_obj.lanes[self.name] = self
 
 
         # Use buffer defined in stepper and override buffers that maybe set at the UNIT or extruder levels
+        self.buffer_obj = self.unit_obj.buffer_obj
         if self.buffer_name is not None:
-            self.buffer_obj = self.printer.lookup_object("AFC_buffer {}".format(self.buffer_name))
-        # Checking if buffer was defined in extruder if not defined in unit/hub
+            try:
+                self.buffer_obj = self.printer.lookup_object("AFC_buffer {}".format(self.buffer_name))
+            except:
+                error_string = 'Error: No config found for buffer: {buffer} in [AFC_stepper {stepper}]. Please make sure [AFC_buffer {buffer}] section exists in your config'.format(
+                    buffer=self.buffer_name, stepper=self.name )
+                raise error(error_string)
+
+        # Checking if buffer was defined in extruder if not defined in unit/stepper
         elif self.buffer_obj is None and self.extruder_obj.tool_start == "buffer":
             if self.extruder_obj.buffer_name is not None:
                 self.AFC.gcode.respond_info("test")
                 self.buffer_obj = self.printer.lookup_object("AFC_buffer {}".format(self.extruder_obj.buffer_name))
-
-        self.AFC.gcode.respond_info("{} Buffer Obj: {}".format(self.name, self.buffer_obj))
-        self.AFC.gcode.respond_info("{} Hub Obj: {}".format(self.name, self.hub_obj))
-        
-        # Send out event so that macros and be registered properly with valid lane names
-        self.printer.send_event("afc_stepper:register_macros", self)
+            else:
+                error_string = 'Error: Buffer was defined as tool_start in [AFC_extruder {extruder}] config, but buffer variable has not been configured. Please add buffer variable to either [AFC_extruder {extruder}], [AFC_stepper {name}] or [AFC_{unit_type} {unit_name}] section in your config file'.format(
+                    extruder=self.extruder_obj.name, name=self.name, unit_type=self.unit_obj.type.replace("_", ""), unit_name=self.unit_obj.name )
+                raise error(error_string)
+        # Valid to not have a buffer defined, check to make sure object exists before adding lane to buffer
+        if self.buffer_obj is not None:
+            self.buffer_obj.lanes[self.name] = self
+            # Assigning buffer name just in case stepper is using buffer defined in units/extruder config
+            self.hub = self.hub_obj.name
 		
         if self.led_name is None: self.led_name = self.unit_obj.led_name
         if self.led_fault is None: self.led_fault = self.unit_obj.led_fault
@@ -232,6 +265,9 @@ class AFCExtruderStepper:
         if self.short_moves_speed is None: self.short_moves_speed = self.unit_obj.short_moves_speed          # Speed in mm/s to move filament when doing short moves
         if self.short_moves_accel is None: self.short_moves_accel = self.unit_obj.short_moves_accel        # Acceleration in mm/s squared when doing short moves
         if self.short_move_dis is None: self.short_move_dis = self.unit_obj.short_move_dis                # Move distance in mm for failsafe moves.
+
+        # Send out event so that macros and be registered properly with valid lane names
+        self.printer.send_event("afc_stepper:register_macros", self)
 
         self.connect_done = True
 
@@ -568,11 +604,11 @@ class AFCExtruderStepper:
 
     def get_status(self, eventtime=None):
         self.response = {}
-        if not self.connect_done: return self.response
         self.response['name'] = self.name
         self.response['unit'] = self.unit
-        self.response['hub'] = self.hub_obj.name
-        self.response['buffer'] = self.buffer_obj.name
+        self.response['hub'] = self.hub
+        self.response['buffer'] = self.buffer_name
+        self.response['buffer_status'] = self.buffer_status()
         self.response['lane'] = self.index
         self.response['map'] = self.map
         self.response['load'] = bool(self.load_state)

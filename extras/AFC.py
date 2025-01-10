@@ -18,31 +18,30 @@ class afc:
 
         # Registering stepper callback so that mux macro can be set properly with valid lane names
         self.printer.register_event_handler("afc_stepper:register_macros",self.register_lane_macros)
+        # Registering webhooks endpoint for <ip_address>/printer/afc/status
         self.webhooks.register_endpoint("afc/status", self._webhooks_status)
 
         self.SPOOL = self.printer.load_object(config,'AFC_spool')
         self.ERROR = self.printer.load_object(config,'AFC_error')
-        self.IDLE = self.printer.load_object(config,'idle_timeout')
+        self.IDLE  = self.printer.load_object(config,'idle_timeout')
         self.gcode = self.printer.lookup_object('gcode')
 
         self.gcode_move = self.printer.load_object(config, 'gcode_move')
-        self.VarFile = config.get('VarFile','../printer_data/config/AFC/') 			# Path to the variables file for AFC configuration.
-        self.cfgloc = self.remove_after_last(self.VarFile,"/")
         
         self.current = None
         self.error_state = False
 
-        self.units = {}
-        self.tools = {}
-        self.lanes = {}
-        self.hubs = {}
-        self.buffers = {}
-        self.tool_cmds={}
+        # Objects for everything configured for AFC
+        self.units      = {}
+        self.tools      = {}
+        self.lanes      = {}
+        self.hubs       = {}
+        self.buffers    = {}
+        self.tool_cmds  = {}
         self.monitoring = False
         self.number_of_toolchanges  = 0
         self.current_toolchange     = 0
 
-        self.unit_order_list = config.get('unit_order_list','')
 
         # tool position when tool change was requested
         self.change_tool_pos = None
@@ -57,6 +56,10 @@ class afc:
         self.speed = 25.
         self.absolute_coord = True
 
+        # Config get section
+        self.unit_order_list = config.get('unit_order_list','')
+        self.VarFile = config.get('VarFile','../printer_data/config/AFC/') 			# Path to the variables file for AFC configuration.
+        self.cfgloc = self.remove_after_last(self.VarFile,"/")
         self.default_material_temps = config.getlists("default_material_temps", None)
 
         # SPOOLMAN
@@ -1068,6 +1071,7 @@ class afc:
         return 'Not Ready:' + self.HexConvert(CUR_LANE.led_not_ready).split(':')[-1]
 
     def HexConvert(self,tmp):
+        if tmp is None: tmp = "0,0,0,0"
         led=tmp.split(',')
         if float(led[0])>0:
             led[0]=int(255*float(led[0]))
@@ -1159,15 +1163,16 @@ class afc:
     def _webhooks_status(self, web_request):
         str = {}
         numoflanes = 0
-        for UNIT in self.units.keys():
-            CUR_UNIT=self.units[UNIT]
-            str[CUR_UNIT.name]={}
+        for unit in self.units.values():
+            str.update({unit.name: { "system": {}}})
             name=[]
-            for NAME in CUR_UNIT.lanes:
-                CUR_LANE=self.lanes[NAME]
-                str[CUR_UNIT.name][CUR_LANE.name]=CUR_LANE.get_status() 
+            for lane in unit.lanes.values():
+                str[unit.name][lane.name]=lane.get_status() 
                 numoflanes +=1
-                name.append(CUR_LANE.name)
+                name.append(lane.name)
+            # Add system here
+            str[unit.name]['system']['type'] = unit.type
+            str[unit.name]['system']['hub_loaded'] = unit.hub_obj.state
 
         str["system"]={}
         str["system"]['current_load']= self.current
@@ -1175,12 +1180,21 @@ class afc:
         str["system"]['num_lanes'] = numoflanes
         str["system"]['num_extruders'] = len(self.tools)
         str["system"]["extruders"]={}
-        web_request.send(str)
+        str["system"]["hubs"] = {}
+        str["system"]["buffers"] = {}
 
-        for EXTRUDE in self.tools.keys():
-            CUR_EXTRUDER = self.tools[EXTRUDE]
-            str["system"]["extruders"][CUR_EXTRUDER.name]={}
-            str["system"]["extruders"][CUR_EXTRUDER.name]['lane_loaded'] = CUR_EXTRUDER.lane_loaded
+        for extruder in self.tools.values():
+            str["system"]["extruders"][extruder.name]={}
+            str["system"]["extruders"][extruder.name] = extruder.get_status()
+        
+        for hub in self.hubs.values():
+            str["system"]["hubs"][hub.name] = hub.get_status()
+
+        for buffer in self.buffers.values():
+            str["system"]["buffers"][buffer.name] = buffer.get_status()
+
+        
+        web_request.send( {"status:" : {"AFC": str}})
 
     def is_homed(self):
         curtime = self.reactor.monotonic()

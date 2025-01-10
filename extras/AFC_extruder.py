@@ -21,7 +21,7 @@ class AFCextruder:
         self.tool_start = config.get('pin_tool_start', None)
         self.tool_end = config.get('pin_tool_end', None)
         self.lane_loaded = None
-
+        self.lanes = {}
         self.buffer_name = config.get('buffer', None)
 
         ppins = self.printer.lookup_object('pins')
@@ -38,8 +38,9 @@ class AFCextruder:
                 if self.enable_sensors_in_gui:
                     self.tool_start_filament_switch_name = "filament_switch_sensor {}".format("tool_start")
                     self.fila_tool_start = add_filament_switch(self.tool_start_filament_switch_name, self.tool_start, self.printer )
+        
+        self.tool_end_state = False
         if self.tool_end is not None:
-            self.tool_end_state = False
             buttons.register_buttons([self.tool_end], self.tool_end_callback)
             if self.enable_sensors_in_gui:
                 self.tool_end_state_filament_switch_name = "filament_switch_sensor {}".format("tool_end")
@@ -71,10 +72,8 @@ class AFCextruder:
         self.response['tool_start'] = self.tool_start
         self.response['tool_start_status'] = bool(self.tool_start_state)
         self.response['tool_end'] = self.tool_end
-        if self.tool_end is not None:
-            self.response['tool_end_status'] = bool(self.tool_end_state)
-        else:
-            self.response['tool_end_status'] =False
+        self.response['tool_end_status'] = bool(self.tool_end_state)
+        self.response['lanes'] = [lane.name for lane in self.lanes.values()]
         return self.response
     
 def load_config_prefix(config):

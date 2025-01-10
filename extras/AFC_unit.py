@@ -11,52 +11,68 @@ class afcUnit:
         self.gcode      = self.printer.lookup_object('gcode')
         self.printer.register_event_handler("klippy:connect", self.handle_connect)
         self.AFC = self.printer.lookup_object('AFC')
-        
-        self.full_name  = config.get_name().split()
-        self.name       = self.full_name[-1]
-        self.screen_mac = config.get('screen_mac', None)
-        self.hub        = config.get("hub", None)
-        self.extruder   = config.get("extruder", None)
-        self.buffer_name    = config.get('buffer', None)
 
         self.lanes      = {}
 
         # Objects
-        self.buffer_obj = None
-        self.hub_obj    = None
-        self.extruder_obj = None
+        self.buffer_obj     = None
+        self.hub_obj        = None
+        self.extruder_obj   = None
         
-        self.led_name =config.get('led_name', self.AFC.led_name)
-        self.led_fault =config.get('led_fault', self.AFC.led_fault)
-        self.led_ready = config.get('led_ready', self.AFC.led_ready)
-        self.led_not_ready = config.get('led_not_ready', self.AFC.led_not_ready)
-        self.led_loading = config.get('led_loading', self.AFC.led_loading)
-        self.led_prep_loaded = config.get('led_loading', self.AFC.led_loading)
-        self.led_unloading = config.get('led_unloading', self.AFC.led_unloading)
-        self.led_tool_loaded = config.get('led_tool_loaded', self.AFC.led_tool_loaded)
+        # Config get section
+        self.full_name          = config.get_name().split()
+        self.name               = self.full_name[-1]
+        self.screen_mac         = config.get('screen_mac', None)
+        self.hub                = config.get("hub", None)
+        self.extruder           = config.get("extruder", None)
+        self.buffer_name        = config.get('buffer', None)
+        self.led_name           = config.get('led_name', self.AFC.led_name)
+        self.led_fault          = config.get('led_fault', self.AFC.led_fault)
+        self.led_ready          = config.get('led_ready', self.AFC.led_ready)
+        self.led_not_ready      = config.get('led_not_ready', self.AFC.led_not_ready)
+        self.led_loading        = config.get('led_loading', self.AFC.led_loading)
+        self.led_prep_loaded    = config.get('led_loading', self.AFC.led_loading)
+        self.led_unloading      = config.get('led_unloading', self.AFC.led_unloading)
+        self.led_tool_loaded    = config.get('led_tool_loaded', self.AFC.led_tool_loaded)
 
-        self.long_moves_speed = config.getfloat("long_moves_speed",  self.AFC.long_moves_speed)          # Speed in mm/s to move filament when doing long moves
-        self.long_moves_accel = config.getfloat("long_moves_accel",  self.AFC.long_moves_accel)         # Acceleration in mm/s squared when doing long moves
-        self.short_moves_speed = config.getfloat("short_moves_speed",  self.AFC.short_moves_speed)      # Speed in mm/s to move filament when doing short moves
-        self.short_moves_accel = config.getfloat("short_moves_accel",  self.AFC.short_moves_accel)      # Acceleration in mm/s squared when doing short moves
-        self.short_move_dis = config.getfloat("short_move_dis",  self.AFC.short_move_dis)               # Move distance in mm for failsafe moves.
+        self.long_moves_speed   = config.getfloat("long_moves_speed",  self.AFC.long_moves_speed)          # Speed in mm/s to move filament when doing long moves
+        self.long_moves_accel   = config.getfloat("long_moves_accel",  self.AFC.long_moves_accel)         # Acceleration in mm/s squared when doing long moves
+        self.short_moves_speed  = config.getfloat("short_moves_speed",  self.AFC.short_moves_speed)      # Speed in mm/s to move filament when doing short moves
+        self.short_moves_accel  = config.getfloat("short_moves_accel",  self.AFC.short_moves_accel)      # Acceleration in mm/s squared when doing short moves
+        self.short_move_dis     = config.getfloat("short_move_dis",  self.AFC.short_move_dis)               # Move distance in mm for failsafe moves.
     
     def handle_connect(self):
         self.AFC = self.printer.lookup_object('AFC')
         self.AFC.units[self.name] = self
 
         if self.hub is not None:
-            self.hub_obj = self.printer.lookup_object("AFC_hub {}".format(self.hub))
+            try:
+                self.hub_obj = self.printer.lookup_object("AFC_hub {}".format(self.hub))
+            except:
+                error_string = 'Error: No config found for hub: {hub} in [AFC_{unit_type} {unit_name}]. Please make sure [AFC_hub {hub}] section exists in your config'.format(
+                hub=self.hub, unit_type=self.type.replace("_", ""), unit_name=self.name )
+                raise error(error_string)
+
             if self.hub_obj.unit is not None:
                 raise error("AFC_hub {} already has a unit {} assigned, can't assign {}. Only one unit can be assigned per AFC_hub".format(self.hub, " ".join(self.hub_obj.unit.full_name), " ".join(self.full_name)))
             else:
                 self.hub_obj.unit = self
 
         if self.extruder is not None:
-            self.extruder_obj = self.printer.lookup_object("AFC_extruder {}".format(self.extruder))
+            try:
+                self.extruder_obj = self.printer.lookup_object("AFC_extruder {}".format(self.extruder))
+            except:
+                error_string = 'Error: No config found for extruder: {extruder} in [AFC_{unit_type} {unit_name}]. Please make sure [AFC_extruder {extruder}] section exists in your config'.format(
+                    extruder=self.extruder, unit_type=self.type.replace("_", ""), unit_name=self.name )
+                raise error(error_string)
 
         if self.buffer_name is not None:
-            self.buffer_obj = self.printer.lookup_object('AFC_buffer {}'.format(self.buffer_name))
+            try:
+                self.buffer_obj = self.printer.lookup_object('AFC_buffer {}'.format(self.buffer_name))
+            except:
+                error_string = 'Error: No config found for buffer: {buffer} in [AFC_{unit_type} {unit_name}]. Please make sure [AFC_buffer {buffer}] section exists in your config'.format(
+                    buffer=self.buffer_name, unit_type=self.type.replace("_", ""), unit_name=self.name )
+                raise error(error_string)
 
         self.AFC.gcode.respond_info("AFC_{}:ready {} {}".format(self.name, self.hub, self.hub_obj))
 

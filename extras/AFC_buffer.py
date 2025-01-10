@@ -19,9 +19,10 @@ class AFCtrigger:
         self.gcode = self.AFC.gcode
         
         self.name = config.get_name().split(' ')[-1]
+        self.lanes = {}
         self.turtleneck = False
         self.belay = False
-        self.last_state = False
+        self.last_state = "Unknown"
         self.enable = False
         self.current = ''
         self.advance_state = False
@@ -98,6 +99,8 @@ class AFCtrigger:
 
             self.gcode.register_mux_command("SET_ROTATION_FACTOR",      "BUFFER", self.name, self.cmd_SET_ROTATION_FACTOR,  desc=self.cmd_LANE_ROT_FACTOR_help)
             self.gcode.register_mux_command("SET_BUFFER_MULTIPLIER",    "BUFFER", self.name, self.cmd_SET_MULTIPLIER,       desc=self.cmd_SET_MULTIPLIER_help)
+        
+        self.AFC.buffers[self.name] = self
 
     def _handle_ready(self):
         self.min_event_systime = self.reactor.monotonic() + 2.
@@ -340,10 +343,10 @@ class AFCtrigger:
         self.velocity = gcmd.get_float('VELOCITY', 0.0)
         self.gcode.respond_info("VELOCITY for {} was updated from {} to {}".format(self.name, old_velocity, self.velocity))
 
-	#TODO: make sure the responds correctly for mainsail status
     def get_status(self, eventtime=None):
         self.response = {}
         self.response['state'] = self.last_state
+        self.response['lanes'] = [lane.name for lane in self.lanes.values()]
         return self.response
    
 def load_config_prefix(config):
