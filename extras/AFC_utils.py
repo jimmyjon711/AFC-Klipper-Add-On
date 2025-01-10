@@ -1,3 +1,8 @@
+# Armored Turtle Automated Filament Changer
+#
+# Copyright (C) 2024 Armored Turtle
+#
+# This file may be distributed under the terms of the GNU GPLv3 license.
 
 
 def add_filament_switch( switch_name, switch_pin, printer ):

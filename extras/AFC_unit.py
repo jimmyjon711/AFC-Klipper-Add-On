@@ -1,3 +1,9 @@
+# Armored Turtle Automated Filament Changer
+#
+# Copyright (C) 2024 Armored Turtle
+#
+# This file may be distributed under the terms of the GNU GPLv3 license.
+
 from configfile import error
 class afcUnit:
     def __init__(self, config):
@@ -103,10 +109,10 @@ class afcUnit:
                             self.AFC.SPOOL.set_active_spool(CUR_LANE.spool_id)
                             self.AFC.afc_led(CUR_LANE.led_tool_loaded, CUR_LANE.led_index)
                             CUR_LANE.status = 'Tooled'
-                            CUR_LANE.extruder_obj.enable_buffer()
+                            CUR_LANE.enable_buffer()
                             CUR_LANE.extruder_obj.lane_loaded = CUR_LANE.name
                         else:
-                            if CUR_LANE.extruder_obj.tool_start_state == True:
+                            if CUR_LANE.get_toolhead_sensor_state() == True:
                                 msg +="<span class=error--text> error in ToolHead. \nLane identified as loaded in AFC.vars.unit file\n but not identified as loaded in AFC.var.tool file</span>"
                                 succeeded = False
                     else:
@@ -116,7 +122,7 @@ class afcUnit:
 
         if assignTcmd: self.AFC.TcmdAssign(CUR_LANE)
         CUR_LANE.do_enable(False)
-        self.AFC.gcode.respond_info( '{lane_name} tool cmd: {tcmd:3} {msg}'.format(lane_name=CUR_LANE.name.upper(), tcmd=CUR_LANE.map, msg=msg))
+        self.AFC.gcode.respond_info( '{lane_name} tool cmd: {tcmd:3} {msg}'.format(lane_name=CUR_LANE.name, tcmd=CUR_LANE.map, msg=msg))
         CUR_LANE.set_afc_prep_done()
 
         return succeeded

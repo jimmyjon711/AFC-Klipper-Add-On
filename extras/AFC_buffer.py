@@ -134,15 +134,15 @@ class AFCtrigger:
             else:
                 multiplier = self.multiplier_high
             self.set_multiplier( multiplier )
-            if self.debug: self.gcode.respond_info("{} buffer enabled".format(self.name.upper()))
+            if self.debug: self.gcode.respond_info("{} buffer enabled".format(self.name))
         elif self.belay:
             self.enable = True
-            if self.debug: self.gcode.respond_info("{} buffer enabled".format(self.name.upper()))
+            if self.debug: self.gcode.respond_info("{} buffer enabled".format(self.name))
             self.belay_move_lane(self.last_state)
 
     def disable_buffer(self):
         self.enable = False
-        if self.debug: self.gcode.respond_info("{} buffer disabled".format(self.name.upper()))
+        if self.debug: self.gcode.respond_info("{} buffer disabled".format(self.name))
         if self.led:
             self.AFC.afc_led(self.led_buffer_disabled, self.led_index)
         if self.turtleneck:
@@ -289,9 +289,9 @@ class AFCtrigger:
                 else:
                     self.set_multiplier( change_factor )
             else:
-                self.gcode.respond_info("BUFFER {} NOT ENABLED".format(self.name.upper()))
+                self.gcode.respond_info("BUFFER {} NOT ENABLED".format(self.name))
         else:
-            self.gcode.respond_info("BUFFER {} CAN'T CHANGE ROTATION DISTANCE".format(self.name.upper()))
+            self.gcode.respond_info("BUFFER {} CAN'T CHANGE ROTATION DISTANCE".format(self.name))
 
     cmd_QUERY_BUFFER_help = "Report Buffer sensor state"
     def cmd_QUERY_BUFFER(self, gcmd):
@@ -317,7 +317,7 @@ class AFCtrigger:
                 LANE = self.AFC.lanes[self.AFC.current]
                 stepper = LANE.extruder_stepper.stepper
                 rotation_dist = stepper.get_rotation_distance()[0]
-                state_info += ("\n{} Rotation distance: {}".format(LANE.name.upper(), rotation_dist))
+                state_info += ("\n{} Rotation distance: {}".format(LANE.name, rotation_dist))
 
         self.gcode.respond_info("{} : {}".format(self.name, state_info))
 

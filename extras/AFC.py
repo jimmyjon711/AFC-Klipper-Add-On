@@ -13,10 +13,12 @@ class afc:
     def __init__(self, config):
         self.printer = config.get_printer()
         self.reactor = self.printer.get_reactor()
+        self.webhooks = self.printer.lookup_object('webhooks')
         self.printer.register_event_handler("klippy:connect",self.handle_connect)
 
         # Registering stepper callback so that mux macro can be set properly with valid lane names
         self.printer.register_event_handler("afc_stepper:register_macros",self.register_lane_macros)
+        self.webhooks.register_endpoint("afc/status", self._webhooks_status)
 
         self.SPOOL = self.printer.load_object(config,'AFC_spool')
         self.ERROR = self.printer.load_object(config,'AFC_error')
@@ -25,7 +27,7 @@ class afc:
 
         self.gcode_move = self.printer.load_object(config, 'gcode_move')
         self.VarFile = config.get('VarFile','../printer_data/config/AFC/') 			# Path to the variables file for AFC configuration.
-        self.cfgloc = self.remove_after_last(self.VarFile,"/") # TODO:Change to pathlib 
+        self.cfgloc = self.remove_after_last(self.VarFile,"/")
         
         self.current = None
         self.error_state = False
@@ -120,7 +122,7 @@ class afc:
 
         # Printing here will not display in console but it will go to klippy.log
         self.print_version()
-    # TODO remove in place of pathlib
+
     def remove_after_last(self, string, char):
         last_index = string.rfind(char)
         if last_index != -1:
@@ -223,13 +225,13 @@ class afc:
                 if self.current != None:
                     if self.current == CUR_LANE.name:
                         if not CUR_LANE.get_toolhead_sensor_state() or not CUR_LANE.hub_obj.state:
-                            lane_msg += '<span class=warning--text>{:<{}} </span>'.format(CUR_LANE.name.upper(), max_lane_length)
+                            lane_msg += '<span class=warning--text>{:<{}} </span>'.format(CUR_LANE.name, max_lane_length)
                         else:
-                            lane_msg += '<span class=success--text>{:<{}} </span>'.format(CUR_LANE.name.upper(), max_lane_length)
+                            lane_msg += '<span class=success--text>{:<{}} </span>'.format(CUR_LANE.name, max_lane_length)
                     else:
-                        lane_msg += '{:<{}} '.format(CUR_LANE.name.upper(),max_lane_length)
+                        lane_msg += '{:<{}} '.format(CUR_LANE.name,max_lane_length)
                 else:
-                    lane_msg += '{:<{}} '.format(CUR_LANE.name.upper(),max_lane_length)
+                    lane_msg += '{:<{}} '.format(CUR_LANE.name,max_lane_length)
 
                 if CUR_LANE.prep_state == True:
                     lane_msg += '| <span class=success--text><--></span> |'
@@ -334,7 +336,7 @@ class afc:
         lane = gcmd.get('LANE', None)
         distance = gcmd.get_float('DISTANCE', 0)
         if lane not in self.lanes:
-            self.gcode.respond_info('{} Unknown'.format(lane.upper()))
+            self.gcode.respond_info('{} Unknown'.format(lane))
             return
         CUR_LANE = self.lanes[lane]
         CUR_LANE.set_load_current() # Making current is set correctly when doing lane moves
@@ -403,19 +405,7 @@ class afc:
                 str[CUR_UNIT.name][CUR_LANE.name]=CUR_LANE.get_status() 
                 numoflanes +=1
                 name.append(CUR_LANE.name)
-            str[CUR_UNIT.name]['system']={}
-            str[CUR_UNIT.name]['lanes'] = name
-            str[CUR_UNIT.name]['system']['type'] = CUR_UNIT.type
-            if CUR_UNIT.hub is None:
-                CUR_UNIT.hub = self.printer.lookup_object('AFC_hub '+list(self.hubs.keys())[0])
-            else:
-               str[CUR_UNIT.name]['system']['hub'] = CUR_UNIT.hub
-               str[UNIT]['system']['hub_loaded']  = CUR_UNIT.hub_obj.state
-               str[UNIT]['system']['Hub_can_cut']  = CUR_UNIT.hub_obj.cut
-            if CUR_UNIT.buffer is not None:
-                str[CUR_UNIT.name]['system']['buffer'] = CUR_UNIT.buffer
-                str[CUR_UNIT.name]['system']['buffer_state'] = CUR_UNIT.buffer_obj.last_state
-            str[CUR_UNIT.name]['system']['screen'] = CUR_UNIT.screen_mac
+
         str["system"]={}
         str["system"]['current_load']= self.current
         str["system"]['num_units'] = len(self.units)
@@ -427,36 +417,9 @@ class afc:
             CUR_EXTRUDER = self.tools[EXTRUDE]
             str["system"]["extruders"][CUR_EXTRUDER.name]={}
             str["system"]["extruders"][CUR_EXTRUDER.name]['lane_loaded'] = CUR_EXTRUDER.lane_loaded
-            if CUR_EXTRUDER.tool_start == "buffer":
-                if CUR_EXTRUDER.lane_loaded == '':
-                    str ["system"]["extruders"][CUR_EXTRUDER.name]['tool_start_sensor'] = False
-                else:
-                    str["system"]["extruders"][CUR_EXTRUDER.name]['tool_start_sensor'] = True
-            else:
-                str["system"]["extruders"][CUR_EXTRUDER.name]['tool_start_sensor'] = bool(CUR_EXTRUDER.tool_start_state)
-            if CUR_EXTRUDER.tool_end is not None:
-                str["system"]["extruders"][CUR_EXTRUDER.name]['tool_end_sensor']   = bool(CUR_EXTRUDER.tool_end_state)
-            else:
-                str["system"]["extruders"][CUR_EXTRUDER.name]['tool_end_sensor']   = None
-            # if self.current is not None:
-            #     CUR_LANE=self.lanes[self.current]
-            #     if CUR_LANE.extruder_name == CUR_EXTRUDER.name:
-            #         CUR_EXTRUDER.buffer_name = CUR_LANE.buffer_obj.name
-            #         str["system"]["extruders"][CUR_EXTRUDER.name]['buffer']   = CUR_EXTRUDER.buffer_name
-            #         str["system"]["extruders"][CUR_EXTRUDER.name]['buffer_status']   = CUR_EXTRUDER.buffer_status()
-            #     else:
-            #         str["system"]["extruders"][CUR_EXTRUDER.name]['buffer']   = 'Not In Use'
-            #         str["system"]["extruders"][CUR_EXTRUDER.name]['buffer_status']   = 'NONE'
-            # else:
-            #     str["system"]["extruders"][CUR_EXTRUDER.name]['buffer']   = 'Not In Use '
-            #     str["system"]["extruders"][CUR_EXTRUDER.name]['buffer_status']   = 'NONE'
 
         with open(self.VarFile+ '.unit', 'w') as f:
-            #status = self.get_status(0)
             f.write(json.dumps(str, indent=4))
-
-        #with open(self.VarFile+ '.tool', 'w') as f:
-        #    f.write(json.dumps(status['system']['extruders'], indent=4))
 
     cmd_HUB_CUT_TEST_help = "Test the cutting sequence of the hub cutter, expects LANE=legN"
     def cmd_HUB_CUT_TEST(self, gcmd):
@@ -479,7 +442,7 @@ class afc:
         lane = gcmd.get('LANE', None)
         self.gcode.respond_info('Testing Hub Cut on Lane: ' + lane)
         if lane not in self.lanes:
-            self.gcode.respond_info('{} Unknown'.format(lane.upper()))
+            self.gcode.respond_info('{} Unknown'.format(lane))
             return
         CUR_LANE = self.lanes[lane]
         CUR_LANE.hub_obj.hub_cut(CUR_LANE)
@@ -511,7 +474,7 @@ class afc:
             return
         self.gcode.respond_info('TEST ROUTINE')
         if lane not in self.lanes:
-            self.gcode.respond_info('{} Unknown'.format(lane.upper()))
+            self.gcode.respond_info('{} Unknown'.format(lane))
             return
         CUR_LANE = self.lanes[lane]
         self.gcode.respond_info('Testing at full speed')
@@ -550,7 +513,7 @@ class afc:
         """
         lane = gcmd.get('LANE', None)
         if lane not in self.lanes:
-            self.gcode.respond_info('{} Unknown'.format(lane.upper()))
+            self.gcode.respond_info('{} Unknown'.format(lane))
             return
         CUR_LANE = self.lanes[lane]
         CUR_HUB = CUR_LANE.hub_obj
@@ -591,7 +554,7 @@ class afc:
         """
         lane = gcmd.get('LANE', None)
         if lane not in self.lanes:
-            self.gcode.respond_info('{} Unknown'.format(lane.upper()))
+            self.gcode.respond_info('{} Unknown'.format(lane))
             return
         CUR_LANE = self.lanes[lane]
         CUR_HUB = CUR_LANE.hub_obj
@@ -639,11 +602,11 @@ class afc:
         """
         lane = gcmd.get('LANE', None)
         if lane not in self.lanes:
-            self.gcode.respond_info('{} Unknown'.format(lane.upper()))
+            self.gcode.respond_info('{} Unknown'.format(lane))
             return
 
         if self.current is not None:
-            self.ERROR.AFC_error("Cannot load {}, {} currently loaded".format(lane.upper(), self.current.upper()), pause=False)
+            self.ERROR.AFC_error("Cannot load {}, {} currently loaded".format(lane, self.current), pause=False)
             return
         CUR_LANE = self.lanes[lane]
         self.TOOL_LOAD(CUR_LANE)
@@ -840,7 +803,7 @@ class afc:
         if lane == None:
             return
         if lane not in self.lanes:
-            self.gcode.respond_info('{} Unknown'.format(lane.upper()))
+            self.gcode.respond_info('{} Unknown'.format(lane))
             return
         CUR_LANE = self.lanes[lane]
         self.TOOL_UNLOAD(CUR_LANE)
@@ -1078,7 +1041,7 @@ class afc:
                 # If a current lane is loaded, unload it first.
                 if self.current is not None:
                     if self.current not in self.lanes:
-                        self.gcode.respond_info('{} Unknown'.format(self.current.upper()))
+                        self.gcode.respond_info('{} Unknown'.format(self.current))
                         return
                     if not self.TOOL_UNLOAD(self.lanes[self.current]):
                         # Abort if the unloading process fails.
@@ -1148,9 +1111,7 @@ class afc:
             str["query"][CUR_UNIT.name]['system']={}
             str["query"][CUR_UNIT.name]['lanes'] = name
             str["query"][CUR_UNIT.name]['system']['type'] = CUR_UNIT.type
-            if CUR_UNIT.hub is None:
-                CUR_UNIT.hub = self.printer.lookup_object('AFC_hub '+list(self.hubs.keys())[0])
-            else:
+            if CUR_UNIT.hub is not None:
                str["query"][CUR_UNIT.name]['system']['hub'] = CUR_UNIT.hub
                str["query"][UNIT]['system']['hub_loaded']  = CUR_UNIT.hub_obj.state
                str["query"][UNIT]['system']['Hub_can_cut']  = CUR_UNIT.hub_obj.cut
@@ -1194,6 +1155,32 @@ class afc:
             #     str["query"]["system"]["extruders"][CUR_EXTRUDER.name]['buffer']   = 'Not In Use '
             #     str["query"]["system"]["extruders"][CUR_EXTRUDER.name]['buffer_status']   = 'NONE'
         return str
+    
+    def _webhooks_status(self, web_request):
+        str = {}
+        numoflanes = 0
+        for UNIT in self.units.keys():
+            CUR_UNIT=self.units[UNIT]
+            str[CUR_UNIT.name]={}
+            name=[]
+            for NAME in CUR_UNIT.lanes:
+                CUR_LANE=self.lanes[NAME]
+                str[CUR_UNIT.name][CUR_LANE.name]=CUR_LANE.get_status() 
+                numoflanes +=1
+                name.append(CUR_LANE.name)
+
+        str["system"]={}
+        str["system"]['current_load']= self.current
+        str["system"]['num_units'] = len(self.units)
+        str["system"]['num_lanes'] = numoflanes
+        str["system"]['num_extruders'] = len(self.tools)
+        str["system"]["extruders"]={}
+        web_request.send(str)
+
+        for EXTRUDE in self.tools.keys():
+            CUR_EXTRUDER = self.tools[EXTRUDE]
+            str["system"]["extruders"][CUR_EXTRUDER.name]={}
+            str["system"]["extruders"][CUR_EXTRUDER.name]['lane_loaded'] = CUR_EXTRUDER.lane_loaded
 
     def is_homed(self):
         curtime = self.reactor.monotonic()
@@ -1336,10 +1323,10 @@ class afc:
                 self.gcode.respond_info('Hub is not clear, check before calibration')
                 return False, ""
             if not CUR_LANE.load_state:
-                self.gcode.respond_info('{} not loaded, load before calibration'.format(CUR_LANE.name.upper()))
+                self.gcode.respond_info('{} not loaded, load before calibration'.format(CUR_LANE.name))
                 return True, ""
 
-            self.gcode.respond_info('Calibrating {}'.format(CUR_LANE.name.upper()))
+            self.gcode.respond_info('Calibrating {}'.format(CUR_LANE.name))
             # reset to extruder
             calc_position(CUR_LANE, lambda: CUR_LANE.load_state, 0, short_dis, tol)
             hub_pos = calibrate_hub(CUR_LANE)
@@ -1348,7 +1335,7 @@ class afc:
             CUR_LANE.hub_load = True
             CUR_LANE.do_enable(False)
             CUR_LANE.dist_hub = hub_pos - CUR_HUB.hub_clear_move_dis
-            cal_msg = "\n{} dist_hub: {}".format(CUR_LANE.name.upper(), (hub_pos - CUR_HUB.hub_clear_move_dis))
+            cal_msg = "\n{} dist_hub: {}".format(CUR_LANE.name, (hub_pos - CUR_HUB.hub_clear_move_dis))
             self.ConfigRewrite(CUR_LANE.fullname, "dist_hub", hub_pos - CUR_HUB.hub_clear_move_dis, cal_msg)
             return True, cal_msg
 
@@ -1388,7 +1375,7 @@ class afc:
             CUR_LANE = self.lanes[lane]
             CUR_EXTRUDER = CUR_LANE.extruder_obj
             CUR_HUB = CUR_LANE.hub_obj
-            self.gcode.respond_info('Calibrating Bowden Length with {}'.format(CUR_LANE.name.upper()))
+            self.gcode.respond_info('Calibrating Bowden Length with {}'.format(CUR_LANE.name))
 
             move_until_state(CUR_LANE, lambda: CUR_HUB.state, CUR_HUB.move_dis, tol, short_dis)
 

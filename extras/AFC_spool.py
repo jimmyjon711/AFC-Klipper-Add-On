@@ -1,3 +1,9 @@
+# Armored Turtle Automated Filament Changer
+#
+# Copyright (C) 2024 Armored Turtle
+#
+# This file may be distributed under the terms of the GNU GPLv3 license.
+
 import json
 try:
     from urllib.request import urlopen
@@ -68,7 +74,7 @@ class afcSpool:
         lane_switch=self.AFC.tool_cmds[map_cmd]
         self.gcode.respond_info("lane to switch is " + lane_switch)
         if lane not in self.AFC.lanes:
-            self.AFC.gcode.respond_info('{} Unknown'.format(lane.upper()))
+            self.AFC.gcode.respond_info('{} Unknown'.format(lane))
             return
         CUR_LANE = self.AFC.lanes[lane]
         self.AFC.tool_cmds[map_cmd]=lane
@@ -104,7 +110,7 @@ class afcSpool:
             return
         color = gcmd.get('COLOR', '#000000')
         if lane not in self.AFC.lanes:
-            self.AFC.gcode.respond_info('{} Unknown'.format(lane.upper()))
+            self.AFC.gcode.respond_info('{} Unknown'.format(lane))
             return
         CUR_LANE = self.AFC.lanes[lane]
         CUR_LANE.color = '#' + color
@@ -135,7 +141,7 @@ class afcSpool:
             return
         weight = gcmd.get('WEIGHT', '')
         if lane not in self.AFC.lanes:
-            self.AFC.gcode.respond_info('{} Unknown'.format(lane.upper()))
+            self.AFC.gcode.respond_info('{} Unknown'.format(lane))
             return
         CUR_LANE = self.AFC.lanes[lane]
         CUR_LANE.weight = weight
@@ -166,7 +172,7 @@ class afcSpool:
             return
         material = gcmd.get('MATERIAL', '')
         if lane not in self.AFC.lanes:
-            self.AFC.gcode.respond_info('{} Unknown'.format(lane.upper()))
+            self.AFC.gcode.respond_info('{} Unknown'.format(lane))
             return
         CUR_LANE = self.AFC.lanes[lane]
         CUR_LANE.material = material
@@ -211,7 +217,7 @@ class afcSpool:
                 return
             SpoolID = gcmd.get('SPOOL_ID', '')
             if lane not in self.AFC.lanes:
-                self.AFC.gcode.respond_info('{} Unknown'.format(lane.upper()))
+                self.AFC.gcode.respond_info('{} Unknown'.format(lane))
                 return
             CUR_LANE = self.AFC.lanes[lane]
             self.set_spoolID(CUR_LANE, SpoolID)
@@ -276,7 +282,7 @@ class afcSpool:
             return
         runout = gcmd.get('RUNOUT', '')
         if lane not in self.AFC.lanes:
-            self.AFC.gcode.respond_info('{} Unknown'.format(lane.upper()))
+            self.AFC.gcode.respond_info('{} Unknown'.format(lane))
             return
         CUR_LANE = self.AFC.lanes[lane]
         CUR_LANE.runout_lane = runout
@@ -296,7 +302,7 @@ class afcSpool:
             for lane in unit.lanes:
                 map_cmd = "T{}".format(t_index)
                 self.AFC.tool_cmds[map_cmd] = lane
-                self.AFC.stepper[lane].map = map_cmd
+                self.AFC.lanes[lane].map = map_cmd
                 t_index += 1
 
         self.AFC.save_vars()
