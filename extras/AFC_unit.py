@@ -126,7 +126,6 @@ class afcUnit:
                             self.AFC.afc_led(CUR_LANE.led_tool_loaded, CUR_LANE.led_index)
                             CUR_LANE.status = 'Tooled'
                             CUR_LANE.enable_buffer()
-                            CUR_LANE.extruder_obj.lane_loaded = CUR_LANE.name
                         else:
                             if CUR_LANE.get_toolhead_sensor_state() == True:
                                 msg +="<span class=error--text> error in ToolHead. \nLane identified as loaded in AFC.vars.unit file\n but not identified as loaded in AFC.var.tool file</span>"

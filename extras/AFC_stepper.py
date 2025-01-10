@@ -61,19 +61,21 @@ class AFCExtruderStepper:
         self.extruder_obj   = None
 
         #stored status variables
-        self.name = config.get_name().split()[-1]
-        self.fullname = config.get_name()
-        self.tool_loaded = False
-        self.loaded_to_hub = False
-        self.spool_id = None
-        self.material = None
-        self.color = None
-        self.weight = None
-        self.runout_lane = 'NONE'
-        self.status = None
+        self.name               = config.get_name().split()[-1]
+        self.fullname           = config.get_name()
+        self.tool_loaded        = False
+        self.loaded_to_hub      = False
+        self.spool_id           = None
+        self.material           = None
+        self.color              = None
+        self.weight             = None
+        self.material           = None
+        self.extruder_temp      = None
+        self.runout_lane        = 'NONE'
+        self.status             = None
         unit                    = config.get('unit')                                   # Unit name(AFC_hub) that this lane belongs to.
-        self.unit = unit.split(':')[0]
-        self.index = int(unit.split(':')[1])
+        self.unit               = unit.split(':')[0]
+        self.index              = int(unit.split(':')[1])
 
         self.extruder_name      = config.get('extruder', None)
         self.map                = config.get('cmd','NONE')

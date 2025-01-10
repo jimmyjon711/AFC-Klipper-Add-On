@@ -64,8 +64,10 @@ class afcPrep:
             PrinterObject=self.AFC.tools[EXTRUDER]
             self.AFC.tools[PrinterObject.name]=PrinterObject
             if 'system' in units:
-                if 'lane_loaded' in units["system"]["extruders"][PrinterObject.name]: PrinterObject.lane_loaded = units["system"]["extruders"][PrinterObject.name]['lane_loaded']
-            self.AFC.current = PrinterObject.lane_loaded
+                # Check to see if lane_loaded is in dictionary and its its not an empty string
+                if 'lane_loaded' in units["system"]["extruders"][PrinterObject.name] and units["system"]["extruders"][PrinterObject.name]['lane_loaded']: 
+                    PrinterObject.lane_loaded = units["system"]["extruders"][PrinterObject.name]['lane_loaded']
+                    self.AFC.current = PrinterObject.lane_loaded
 
         for LANE in self.AFC.lanes.keys():
             CUR_LANE = self.AFC.lanes[LANE]

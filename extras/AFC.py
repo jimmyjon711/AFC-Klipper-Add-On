@@ -618,7 +618,7 @@ class afc:
         temp_value = self.heater.min_extrude_temp + 5
         if CUR_LANE.extruder_temp is not None:
             temp_value = CUR_LANE.extruder_temp
-        elif self.default_material_temps is not None:
+        elif self.default_material_temps is not None and CUR_LANE.material is not None:
             for mat in self.default_material_temps:
                 m = mat.split(":")
                 if m[0] in CUR_LANE.material:
@@ -1170,7 +1170,6 @@ class afc:
                 str[unit.name][lane.name]=lane.get_status() 
                 numoflanes +=1
                 name.append(lane.name)
-            # Add system here
             str[unit.name]['system']['type'] = unit.type
             str[unit.name]['system']['hub_loaded'] = unit.hub_obj.state
 
@@ -1184,7 +1183,6 @@ class afc:
         str["system"]["buffers"] = {}
 
         for extruder in self.tools.values():
-            str["system"]["extruders"][extruder.name]={}
             str["system"]["extruders"][extruder.name] = extruder.get_status()
         
         for hub in self.hubs.values():
