@@ -251,7 +251,7 @@ class AFCExtruderStepper:
         if self.buffer_obj is not None:
             self.buffer_obj.lanes[self.name] = self
             # Assigning buffer name just in case stepper is using buffer defined in units/extruder config
-            self.hub = self.hub_obj.name
+            self.buffer_name = self.buffer_obj.name
 		
         if self.led_name is None: self.led_name = self.unit_obj.led_name
         if self.led_fault is None: self.led_fault = self.unit_obj.led_fault
