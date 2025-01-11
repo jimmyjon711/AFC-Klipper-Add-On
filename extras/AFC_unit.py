@@ -142,7 +142,16 @@ class afcUnit:
 
         return succeeded
     def get_status(self, eventtime=None):
-        self.response = {}
-        self.response['lanes'] = [lane.name for lane in self.lanes.values()]
+        response = {}
+        response['lanes'] = [lane.name for lane in self.lanes.values()]
+        response["extruders"]={}
+        response["hubs"] = {}
+        response["buffers"] = {}
 
-        return self.response
+        for lane in self.lanes.values():
+            if lane.hub is not None: response["extruders"].update({"{}".format(lane.extruder_obj.name): lane.extruder_obj.get_status()})
+            if lane.extruder_name is not None: response["hubs"].update({"{}".format(lane.hub_obj.name): lane.hub_obj.get_status()})
+            if lane.buffer_name is not None: response["buffers"].update({"{}".format(lane.buffer_obj.name): lane.buffer_obj.get_status()})
+
+
+        return response
