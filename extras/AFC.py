@@ -16,6 +16,7 @@ class State:
     ERROR           = "Error"
     LOADING         = "Loading Lane"
     UNLOADING       = "Unloading Lane"
+    EJECTING_LANE   = "Ejecting Lane"
     MOVING_LANE     = "Moving Lane"
     RESTORING_POS   = "Restoring Position"
 
@@ -356,12 +357,12 @@ class afc:
             self.gcode.respond_info('{} Unknown'.format(lane))
             return
         CUR_LANE = self.lanes[lane]
-        self.current_state = "{} {}".format(STATE.MOVING_LANE, CUR_LANE,name)
+        self.current_state = State.MOVING_LANE
         CUR_LANE.set_load_current() # Making current is set correctly when doing lane moves
         CUR_LANE.do_enable(True)
         CUR_LANE.move(distance, CUR_LANE.short_moves_speed, CUR_LANE.short_moves_accel, True)
         CUR_LANE.do_enable(False)
-        self.current_state = STATE.IDLE
+        self.current_state = State.IDLE
 
     def save_pos(self):
         # Only save previous location on the first toolchange call to keep an error state from overwriting the location
@@ -379,7 +380,7 @@ class afc:
         restore_pos function restores the previous saved position, speed and coord type. The resume uses
         the z_hop value to lift, move to previous x,y coords, then lower to saved z position.
         """
-        self.current_state = STATE.RESTORING_POS
+        self.current_state = State.RESTORING_POS
         newpos = self.toolhead.get_position()
         newpos[2] = self.last_gcode_position[2] + self.z_hop
 
@@ -407,7 +408,7 @@ class afc:
         # Drop to previous z
         newpos[2] = self.last_gcode_position[2]
         self.gcode_move.move_with_transform(newpos, speedz)
-        self.current_state = STATE.IDLE
+        self.current_state = State.IDLE
 
     # Helper function to write variables to file. Prints with indents to make it more readable for users
     def save_vars(self):
@@ -580,7 +581,7 @@ class afc:
         CUR_LANE = self.lanes[lane]
         CUR_HUB = CUR_LANE.hub_obj
 
-        self.current_state = STATE.UNLOADING
+        self.current_state = State.EJECTING_LANE
 
         if CUR_LANE.name != self.current:
             # Setting status as ejecting so if filament is removed and de-activates the prep sensor while
@@ -606,7 +607,7 @@ class afc:
         else:
             self.gcode.respond_info("LANE {} is loaded in toolhead, can't unload.".format(CUR_LANE.name))
 
-        self.current_state = STATE.IDLE
+        self.current_state = State.IDLE
 
     cmd_TOOL_LOAD_help = "Load lane into tool"
     def cmd_TOOL_LOAD(self, gcmd):
@@ -700,7 +701,7 @@ class afc:
         # Lookup extruder and hub objects associated with the lane.
         CUR_HUB = CUR_LANE.hub_obj
         CUR_EXTRUDER = CUR_LANE.extruder_obj
-        self.current_state = STATE.LOADING
+        self.current_state = State.LOADING
 
         # Set the lane status to 'loading' and activate the loading LED.
         CUR_LANE.status = 'Tool Loading'
@@ -796,7 +797,7 @@ class afc:
             self.SPOOL.set_active_spool(CUR_LANE.spool_id)
             self.afc_led(CUR_LANE.led_tool_loaded, CUR_LANE.led_index)
             self.save_vars()
-            self.current_state = STATE.IDLE
+            self.current_state = State.IDLE
         else:
             # Handle errors if the hub is not clear or the lane is not ready for loading.
             if CUR_HUB.state:
@@ -860,7 +861,7 @@ class afc:
             # If no lane is provided, exit the function early with a failure.
             return False
 
-        self.current_state  = STATE.UNLOADING
+        self.current_state  = State.UNLOADING
         self.gcode.respond_info("Unloading {}".format(CUR_LANE.name))
         CUR_LANE.status = 'Tool Unloading'
         self.save_vars()
@@ -1001,7 +1002,7 @@ class afc:
         CUR_LANE.do_enable(False)
         self.save_vars()
         self.gcode.respond_info("LANE {} unload done".format(CUR_LANE.name))
-        self.current_state = STATE.IDLE
+        self.current_state = State.IDLE
         return True
 
     cmd_CHANGE_TOOL_help = "change filaments in tool head"
@@ -1122,9 +1123,11 @@ class afc:
 
     def get_status(self, eventtime=None):   #   will be removed near future  do not use for future coding
         str = {}
-        str={}
-        str['current_load'] = self.current
-        str['next_load']    = self.next_lane_load
+        str['current_load']             = self.current
+        str['next_load']                = self.next_lane_load
+        str['current_state']            = self.current_state
+        str["current_toolchange"]       = self.current_toolchange
+        str["number_of_toolchanges"]    = self.number_of_toolchanges
         unitdisplay =[]
         for UNIT in self.units.keys():
             CUR_UNIT=self.units[UNIT]
@@ -1135,8 +1138,6 @@ class afc:
         str["extruders"] = list(self.tools.keys())
         str["hubs"] = list(self.hubs.keys())
         str["buffers"] = list(self.buffers.keys())
-        str["current_toolchange"]       = self.current_toolchange
-        str["number_of_toolchanges"]    = self.number_of_toolchanges
         return str
     
     def _webhooks_status(self, web_request):
