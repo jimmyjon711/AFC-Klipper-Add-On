@@ -149,9 +149,9 @@ class afcUnit:
         response["buffers"] = {}
 
         for lane in self.lanes.values():
-            if lane.hub is not None: response["extruders"].update({"{}".format(lane.extruder_obj.name): lane.extruder_obj.get_status()})
-            if lane.extruder_name is not None: response["hubs"].update({"{}".format(lane.hub_obj.name): lane.hub_obj.get_status()})
-            if lane.buffer_name is not None: response["buffers"].update({"{}".format(lane.buffer_obj.name): lane.buffer_obj.get_status()})
+            if lane.hub is not None and lane.hub not in response["hubs"]: response["hubs"].append(lane.hub)
+            if lane.extruder_name is not None and lane.extruder_name not in response["extruders"]: response["extruders"].append(lane.extruder_name)
+            if lane.buffer_name is not None and lane.buffer_name not in response["buffers"]: response["buffers"].append(lane.buffer_name)
 
 
         return response
