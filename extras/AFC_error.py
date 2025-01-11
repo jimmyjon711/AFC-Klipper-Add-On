@@ -1,4 +1,5 @@
 
+from extras.AFC import STATE
 
 class afcError:
     def __init__(self, config):
@@ -84,6 +85,7 @@ class afcError:
         if state == True and self.AFC.error_state == False:
             self.AFC.save_pos()
         self.AFC.error_state = state
+        self.AFC.current_state = STATE.ERROR if state else STATE.IDLE
 
     def AFC_error(self, msg, pause=True):
         # Handle AFC errors
