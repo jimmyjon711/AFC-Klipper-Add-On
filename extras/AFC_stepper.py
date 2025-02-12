@@ -179,6 +179,7 @@ class AFCExtruderStepper:
                 self.load_filament_switch_name = "filament_switch_sensor {}_load".format(self.name)
                 self.fila_load = add_filament_switch(self.load_filament_switch_name, self.load, self.printer )
         self.connect_done = False
+        self.prep_active = False
 
     def _handle_ready(self):
         """
@@ -186,6 +187,12 @@ class AFCExtruderStepper:
         """
         if self.unit_obj is None:
             raise error("Unit {unit} is not defined in your configuration file. Please defined unit ex. [AFC_BoxTurtle {unit}]".format(unit=self.unit))
+
+        if self.led_index is not None:
+            # Verify that LED config is found
+            error_string, led = self.AFC.FUNCTION.verify_led_object(self.led_index)
+            if led is None:
+                raise error(error_string)
 
     def handle_unit_connect(self, unit_obj):
         """
@@ -200,28 +207,27 @@ class AFCExtruderStepper:
         self.AFC.lanes[self.name] = self
 
         self.hub_obj = self.unit_obj.hub_obj
-        # TODO: once supported add check if users is not using a hub
-        if self.hub is not None and self.hub !='direct':
-            try:
-                self.hub_obj = self.printer.lookup_object("AFC_hub {}".format(self.hub))
-            except:
-                error_string = 'Error: No config found for hub: {hub} in [AFC_stepper {stepper}]. Please make sure [AFC_hub {hub}] section exists in your config'.format(
-                hub=self.hub, stepper=self.name )
-                raise error(error_string)
-        elif self.hub_obj is None:
-            # Check to make sure at least 1 hub exists in config, if not error out with message
-            if len(self.AFC.hubs) == 0:
-                error_string = "Error: AFC_hub not found in configuration please make sure there is a [AFC_hub <hub_name>] defined in your configuration"
-                raise error(error_string)
-            # Setting hub to first hub in AFC hubs dictionary
-            if len(self.AFC.hubs) > 0:
-                self.hub_obj = next(iter(self.AFC.hubs.values()))
-            # Set flag to warn during prep that multiple hubs were found
-            if len(self.AFC.hubs) > 1:
-                self.multi_hubs_found = True
+        if self.hub != 'direct':
+            if self.hub is not None:
+                try:
+                    self.hub_obj = self.printer.lookup_object("AFC_hub {}".format(self.hub))
+                except:
+                    error_string = 'Error: No config found for hub: {hub} in [AFC_stepper {stepper}]. Please make sure [AFC_hub {hub}] section exists in your config'.format(
+                    hub=self.hub, stepper=self.name )
+                    raise error(error_string)
+            elif self.hub_obj is None:
+                # Check to make sure at least 1 hub exists in config, if not error out with message
+                if len(self.AFC.hubs) == 0:
+                    error_string = "Error: AFC_hub not found in configuration please make sure there is a [AFC_hub <hub_name>] defined in your configuration"
+                    raise error(error_string)
+                # Setting hub to first hub in AFC hubs dictionary
+                if len(self.AFC.hubs) > 0:
+                    self.hub_obj = next(iter(self.AFC.hubs.values()))
+                # Set flag to warn during prep that multiple hubs were found
+                if len(self.AFC.hubs) > 1:
+                    self.multi_hubs_found = True
 
-        # Assigning hub name just in case stepper is using hub defined in units config
-        if self.hub !='direct':
+            # Assigning hub name just in case stepper is using hub defined in units config
             self.hub = self.hub_obj.name
             self.hub_obj.lanes[self.name] = self
         else:
@@ -406,6 +412,11 @@ class AFCExtruderStepper:
 
     def prep_callback(self, eventtime, state):
         self.prep_state = state
+
+        if self.prep_active == False:
+            self.prep_active = True
+        else:
+            return
         # Checking to make sure printer is ready and making sure PREP has been called before trying to load anything
         if self.printer.state_message == 'Printer is ready' and True == self._afc_prep_done and self.status != 'Tool Unloading':
             # Only try to load when load state trigger is false
@@ -428,9 +439,12 @@ class AFCExtruderStepper:
                         break
                 self.status=''
 
-                if self.hub == 'direct':
+                # Verify that load state is still true as this would still trigger if prep sensor was triggered and then filament was removed
+                #   This is only really a issue when using direct and still using load sensor
+                if self.hub == 'direct' and self.prep_state:
                     self.AFC.TOOL_LOAD(self)
                     return
+
                 # Checking if loaded to hub(it should not be since filament was just inserted), if false load to hub. Does a fast load if hub distance is over 200mm
                 if self.load_to_hub and not self.loaded_to_hub and self.load_state and self.prep_state:
                     self.move(self.dist_hub, self.dist_hub_move_speed, self.dist_hub_move_accel, self.dist_hub > 200)
@@ -472,7 +486,9 @@ class AFCExtruderStepper:
                 self.loaded_to_hub = False
                 self.AFC.SPOOL._clear_values(self)
                 self.AFC.FUNCTION.afc_led(self.AFC.led_not_ready, self.led_index)
-            self.AFC.save_vars()
+
+        self.prep_active = False
+        self.AFC.save_vars()
 
     def do_enable(self, enable):
         self.sync_print_time()

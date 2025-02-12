@@ -1071,7 +1071,7 @@ class afc:
                 numoflanes +=1
                 name.append(lane.name)
             str[unit.name]['system']['type']        = unit.type
-            str[unit.name]['system']['hub_loaded']  = unit.hub_obj.state
+            str[unit.name]['system']['hub_loaded'] = unit.hub_obj.state if unit.hub_obj is not None else None
 
         str["system"]                           = {}
         str["system"]['current_load']           = self.current

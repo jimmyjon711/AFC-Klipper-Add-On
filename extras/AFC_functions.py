@@ -295,18 +295,40 @@ class afcFunction:
         pause_resume = self.printer.lookup_object("pause_resume")
         return bool(pause_resume.get_status(eventtime)["is_paused"])
 
+    def get_current_lane(self):
+        if self.printer.state_message == 'Printer is ready':
+            current_extruder = self.AFC.toolhead.get_extruder().name
+            if current_extruder in self.AFC.tools:
+                return self.AFC.tools[current_extruder].lane_loaded
+        return None
+
+    def get_current_lane_obj(self):
+        curr_lane_obj = None
+        curr_lane = self.get_current_lane()
+        if curr_lane in self.AFC.lanes:
+            curr_lane_obj = self.AFC.lanes[curr_lane]
+        return curr_lane_obj
+
+    def verify_led_object(self, led_name):
+        error_string = ""
+        led = None
+        afc_object = 'AFC_led '+ led_name.split(':')[0]
+        try:
+            led = self.printer.lookup_object(afc_object)
+            found = True
+        except:
+            error_string = "Error: Cannot find [{}] in config, make sure led_index in config is correct for AFC_stepper {}".format(afc_object, led_name.split(':')[-1])
+        return error_string, led
+
     def afc_led (self, status, idx=None):
         if idx == None:
             return
-        # Try to find led object, if not found print error to console for user to see
-        afc_object = 'AFC_led '+ idx.split(':')[0]
-        try:
-            led = self.printer.lookup_object(afc_object)
+
+        error_string, led = self.verify_led_object(idx)
+        if led is not None:
             led.led_change(int(idx.split(':')[1]), status)
-        except:
-            error_string = "Error: Cannot find [{}] in config, make sure led_index in config is correct for AFC_stepper {}".format(afc_object, idx.split(':')[-1])
-            self.AFC.gcode.respond_info( error_string)
-        led.led_change(int(idx.split(':')[1]), status)
+        else:
+            self.AFC.gcode.respond_info( error_string )
 
     def get_filament_status(self, CUR_LANE):
         if CUR_LANE.prep_state:
