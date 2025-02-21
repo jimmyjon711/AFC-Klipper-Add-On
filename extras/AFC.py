@@ -5,6 +5,7 @@
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
 import json
+import re
 try:
     from urllib.request import urlopen
 except:
@@ -301,7 +302,10 @@ class afc:
                     self.gcode.run_script_from_command(self.RENAMED_UNLOAD_FILAMENT)
                     self.gcode.respond_info("Filament unloaded")
                 else:
-                    self.gcode.respond_info("Filament loaded in bypass, not doing tool load")
+                    msg = "Filament loaded in bypass, not doing tool load"
+                    # If printing report as error so position is saved and then print is paused
+                    self.ERROR.AFC_error(msg, pause=self.FUNCTION.in_print())
+
                 return True
         except:
             pass
@@ -379,7 +383,7 @@ class afc:
             None
         """
         if self.FUNCTION.is_printing():
-            self.ERROR.AFC_error("Cannot move lane while printer is printing")
+            self.ERROR.AFC_error("Cannot move lane while printer is printing", pause=False)
             return
         lane = gcmd.get('LANE', None)
         distance = gcmd.get_float('DISTANCE', 0)
@@ -499,7 +503,7 @@ class afc:
         """
 
         if self.FUNCTION.is_printing():
-            self.ERROR.AFC_error("Cannot load lane to hub while printer is printing")
+            self.ERROR.AFC_error("Cannot load lane to hub while printer is printing", pause=False)
             return
 
         lane = gcmd.get('LANE', None)
@@ -543,7 +547,7 @@ class afc:
             None
         """
         if self.FUNCTION.is_printing():
-            self.ERROR.AFC_error("Cannot eject lane while printer is printing")
+            self.ERROR.AFC_error("Cannot eject lane while printer is printing", pause=False)
             return
 
         lane = gcmd.get('LANE', None)
@@ -613,7 +617,7 @@ class afc:
             return
 
         if self.current is not None:
-            self.ERROR.AFC_error("Cannot load {}, {} currently loaded".format(lane, self.current), pause=False)
+            self.ERROR.AFC_error("Cannot load {}, {} currently loaded".format(lane, self.current), pause=self.FUNCTION.in_print())
             return
 
         purge_length = gcmd.get('PURGE_LENGTH', None)
@@ -635,7 +639,7 @@ class afc:
             return False
 
         if CUR_LANE is None:
-            self.ERROR.AFC_error("No lane provided to load, not loading any lane.", pause=False)
+            self.ERROR.AFC_error("No lane provided to load, not loading any lane.", pause=self.FUNCTION.in_print())
             # Exit early if no lane is provided.
             return False
 
@@ -842,7 +846,7 @@ class afc:
 
         if CUR_LANE is None:
             # If no lane is provided, exit the function early with a failure.
-            self.ERROR.AFC_error("No lane is currently loaded, nothing to unload", pause=False)
+            self.ERROR.AFC_error("No lane is currently loaded, nothing to unload", pause=self.FUNCTION.in_print())
             return False
 
         self.current_state  = State.UNLOADING
@@ -1052,22 +1056,27 @@ class afc:
                 purge_length = purge_length[1:]
 
         command_line = gcmd.get_commandline()
-        command = command_line.split(' ')[0].upper()
+
+        # Remove everything after ; since it could contain strings like CHANGE in a comment and should be ignored
+        command = re.sub( ';.*', '', command_line)
+        command = command.split(' ')[0].upper()
         tmp = gcmd.get_commandline()
         cmd = tmp.upper()
         Tcmd = ''
         if 'CHANGE' in command:
             lane = gcmd.get('LANE', None)
-            for key in self.tool_cmds.keys():
-                if self.tool_cmds[key].upper() == lane.upper():
-                    Tcmd = key
-                    break
+            if lane is not None:
+                for key in self.tool_cmds.keys():
+                    if self.tool_cmds[key].upper() == lane.upper():
+                        Tcmd = key
+                        break
         else:
             Tcmd = command
 
         if Tcmd == '':
-            self.gcode.respond_info("I did not understand the change -- " +cmd)
+            self.ERROR.AFC_error("I did not understand the change -- " +cmd, pause=self.FUNCTION.in_print())
             return
+
         self.CHANGE_TOOL(self.lanes[self.tool_cmds[Tcmd]], purge_length)
 
     def CHANGE_TOOL(self, CUR_LANE, purge_length):

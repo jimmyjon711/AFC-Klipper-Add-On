@@ -537,8 +537,8 @@ class AFCExtruderStepper:
                         # Pause print
                         self.status = None
                         self.AFC.FUNCTION.afc_led(self.AFC.led_not_ready, self.led_index)
-                        self.AFC.gcode.respond_info("Runout triggered for lane {} and runout lane is not setup to switch to another lane".format(self.name))
-                        self.AFC.ERROR.pause_print()
+                        self.AFC.ERROR.AFC_error("Runout triggered for lane {} and runout lane is not setup to switch to another lane".format(self.name))
+
                 elif self.prep_state == True and self.load_state == True and not self.AFC.FUNCTION.is_printing():
                     message = 'Cannot load {} load sensor is triggered.'.format(self.name)
                     message += '\n    Make sure filament is not stuck in load sensor or check to make sure load sensor is not stuck triggered.'
