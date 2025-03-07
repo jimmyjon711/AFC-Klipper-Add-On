@@ -186,7 +186,7 @@ class AFCExtruderStepper:
         self.connect_done = False
         self.prep_active = False
         self.last_prep_time = 0
-    
+
     def __str__(self):
         return self.name
 

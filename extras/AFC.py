@@ -449,7 +449,7 @@ class afc:
 
         # Determine z movement, get the min value to not exceed max z movement
         newpos[2] = min(max_z, z_amount)
-        
+
         speedz = self.resume_z_speed if self.resume_z_speed > 0 else self.gcode_move.speed
         self.gcode_move.move_with_transform(newpos, speedz)
 
@@ -1238,7 +1238,7 @@ class afc:
             # Load the new lane and restore the toolhead position if successful.
             if self.TOOL_LOAD(CUR_LANE, purge_length) and not self.error_state:
                 self.afcDeltaTime.log_total_time("Total change time:")
-                if restore_pos: 
+                if restore_pos:
                     self.restore_pos()
                 self.in_toolchange = False
                 # Setting next lane load as none since toolchange was successful

@@ -169,7 +169,7 @@ class afcError:
             self.set_error_state(False)
             self.AFC.restore_pos(False)
             self.pause = False
-    
+
     cmd_AFC_RESUME_help = "Pauses print, raises z by z-hop amount, and then calls users pause macro"
     def cmd_AFC_PAUSE(self, gcmd):
         self.logger.debug("AFC_PAUSE")
