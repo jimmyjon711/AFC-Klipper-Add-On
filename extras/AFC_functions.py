@@ -719,7 +719,7 @@ class afcFunction:
         CUR_LANE.loaded_to_hub = True
         CUR_LANE.do_enable(False)
 
-        self.AFC.gcode.respond_info('{} reset to hub, take nessecary action'.format(lane))
+        self.AFC.gcode.respond_info('{} reset to hub, take necessary action'.format(lane))
 
     def _calc_bowden_length(self, config_length, current_length, new_length):
         """
@@ -741,7 +741,7 @@ class afcFunction:
                 bowden_length = current_length + bowden_value
             else:
                 bowden_length = float(new_length)
-        
+
         return bowden_length
 
     cmd_SET_BOWDEN_LENGTH_help = "Helper to dynamically set length of bowden between hub and toolhead. Pass in HUB if using multiple box turtles"
@@ -751,7 +751,7 @@ class afcFunction:
         It retrieves the hub specified by the 'HUB' parameter and the length adjustment specified
         by the 'LENGTH' parameter. If the hub is not specified and a lane is currently loaded,
         it uses the hub of the current lane. To reset length back to config value, pass in `reset`
-        for each length to reset to value in config file. Adding +/- in front of the length will 
+        for each length to reset to value in config file. Adding +/- in front of the length will
         increase/decrease bowden length by that amount.
 
         Usage: `SET_BOWDEN_LENGTH HUB=<hub> LENGTH=<length>`

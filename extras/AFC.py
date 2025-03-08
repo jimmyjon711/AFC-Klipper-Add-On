@@ -442,7 +442,7 @@ class afc:
         Common function for return resume speed
         """
         return self.resume_speed if self.resume_speed > 0 else self.speed
-    
+
     def _get_resume_speedz(self):
         """
         Common function for return resume z speed
@@ -506,7 +506,6 @@ class afc:
         # Restore absolute coords
         self.gcode_move.absolute_coord = self.absolute_coord
 
-        speed = self.resume_speed if self.resume_speed > 0 else self.gcode_move.speed
         # Update GCODE STATE variables
         self.gcode_move.base_position = self.base_position
         self.gcode_move.last_position[:3] = self.last_gcode_position[:3]
