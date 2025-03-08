@@ -437,6 +437,18 @@ class afc:
         CUR_LANE.do_enable(False)
         self.current_state = State.IDLE
 
+    def _get_resume_speed(self):
+        """
+        Common function for return resume speed
+        """
+        return self.resume_speed if self.resume_speed > 0 else self.speed
+    
+    def _get_resume_speedz(self):
+        """
+        Common function for return resume z speed
+        """
+        return self.resume_z_speed if self.resume_z_speed > 0 else self.speed
+
     def _move_z_pos(self, z_amount):
         """
         Common function helper to move z, also does a check for max z so toolhead does not exceed max height
@@ -450,8 +462,7 @@ class afc:
         # Determine z movement, get the min value to not exceed max z movement
         newpos[2] = min(max_z, z_amount)
 
-        speedz = self.resume_z_speed if self.resume_z_speed > 0 else self.gcode_move.speed
-        self.gcode_move.move_with_transform(newpos, speedz)
+        self.gcode_move.move_with_transform(newpos, self._get_resume_speedz())
 
     def save_pos(self):
         """
@@ -496,7 +507,6 @@ class afc:
         self.gcode_move.absolute_coord = self.absolute_coord
 
         speed = self.resume_speed if self.resume_speed > 0 else self.gcode_move.speed
-        speedz = self.resume_z_speed if self.resume_z_speed > 0 else self.gcode_move.speed
         # Update GCODE STATE variables
         self.gcode_move.base_position = self.base_position
         self.gcode_move.last_position[:3] = self.last_gcode_position[:3]
@@ -512,11 +522,11 @@ class afc:
 
         # Move to previous x,y location
         newpos[:2] = self.last_gcode_position[:2]
-        self.gcode_move.move_with_transform(newpos, speed)
+        self.gcode_move.move_with_transform(newpos, self._get_resume_speed() )
 
         # Drop to previous z
         newpos[2] = self.last_gcode_position[2]
-        self.gcode_move.move_with_transform(newpos, speedz)
+        self.gcode_move.move_with_transform(newpos, self._get_resume_speedz() )
         self.current_state = State.IDLE
         self.position_saved = False
 

@@ -150,8 +150,7 @@ class afcBoxTurtle(afcUnit):
             success, message, hub_dis = self.calibrate_hub(CUR_LANE, tol)
 
             if not success:
-                msg = '{}'.format(message)
-                return False, msg, hub_dis
+                return False, message, hub_dis
 
             if CUR_HUB.state:
                 # reset at hub

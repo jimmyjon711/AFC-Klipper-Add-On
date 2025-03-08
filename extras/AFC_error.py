@@ -153,11 +153,11 @@ class afcError:
         """
         # Save current pause state
         temp_is_paused = self.AFC.FUNCTION.is_paused()
-        currPos = self.AFC.toolhead.get_position()
+        curr_pos = self.AFC.toolhead.get_position()
 
         # Check if current position is below saved gcode position, if its lower first raise z above last saved
         #   position so that toolhead does not crash into part
-        if (currPos[2] <= self.AFC.last_gcode_position[2]):
+        if (curr_pos[2] <= self.AFC.last_gcode_position[2]):
             self.AFC._move_z_pos( self.AFC.last_gcode_position[2] + self.AFC.z_hop )
 
         self.logger.debug("Before User Restore")
