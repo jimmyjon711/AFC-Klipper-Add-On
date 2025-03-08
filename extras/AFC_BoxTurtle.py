@@ -287,8 +287,7 @@ class afcBoxTurtle(afcUnit):
             success, message, hub_pos = self.calibrate_hub(CUR_LANE, tol)
 
             if not success:
-                msg = '{}'.format(message)
-                return False, msg, hub_pos
+                return False, message, hub_pos
 
             if CUR_HUB.state:
                 CUR_LANE.move(CUR_HUB.move_dis * -1, CUR_LANE.short_moves_speed, CUR_LANE.short_moves_accel, True)

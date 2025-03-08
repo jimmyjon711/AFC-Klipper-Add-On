@@ -749,27 +749,27 @@ class afcFunction:
         """
         This function adjusts the length of the Bowden tube between the hub and the toolhead.
         It retrieves the hub specified by the 'HUB' parameter and the length adjustment specified
-        by the 'LENGTH' parameter. If the hub is not specified and a lane is currently loaded,
-        it uses the hub of the current lane. To reset length back to config value, pass in `reset`
-        for each length to reset to value in config file. Adding +/- in front of the length will
-        increase/decrease bowden length by that amount.
+        by the 'LENGTH' parameter. UNLOAD_LENGTH adjusts unload Bowden length. If the hub is not specified
+        and a lane is currently loaded, it uses the hub of the current lane. To reset length back to config
+        value, pass in `reset` for each length to reset to value in config file. Adding +/- in front of the
+        length will increase/decrease bowden length by that amount.
 
-        Usage: `SET_BOWDEN_LENGTH HUB=<hub> LENGTH=<length>`
-        Example: `SET_BOWDEN_LENGTH HUB=Turtle_1 LENGTH=100`
+        Usage: `SET_BOWDEN_LENGTH HUB=<hub> LENGTH=<length> UNLOAD_LENGTH=<length>`
+        Example: `SET_BOWDEN_LENGTH HUB=Turtle_1 LENGTH=+100 UNLOAD_LENGTH=-100`
 
         Args:
             gcmd: The G-code command object containing the parameters for the command.
                   Expected parameters:
                   - HUB: The name of the hub to be adjusted (optional).
                   - LENGTH: The length adjustment value for afc_bowden_length variable (optional).
-                  - UNLOAD: The length adjustment value for afc_unload_bowden_length variable (optional).
+                  - UNLOAD_LENGTH: The length adjustment value for afc_unload_bowden_length variable (optional).
 
         Returns:
             None
         """
         hub           = gcmd.get("HUB", None )
         length_param  = gcmd.get('LENGTH', None)
-        unload_length = gcmd.get('UNLOAD', None)
+        unload_length = gcmd.get('UNLOAD_LENGTH', None)
 
         # If hub is not passed in try and get hub if a lane is currently loaded
         if hub is None and self.AFC.current is not None:
