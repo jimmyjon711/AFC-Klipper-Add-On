@@ -995,6 +995,7 @@ class afcDeltaTime:
             self.logger.debug("Error in log_with_time function {}".format(e))
 
     def log_major_delta(self, msg, debug=True):
+        delta_time = 0
         try:
             curr_time = datetime.now()
             delta_time = (curr_time - self.major_delta_time ).total_seconds()
@@ -1003,8 +1004,11 @@ class afcDeltaTime:
             self.major_delta_time = curr_time
         except Exception as e:
             self.logger.debug("Error in log_major_delta function {}".format(e))
+        
+        return delta_time
 
     def log_total_time(self, msg):
+        total_time = 0
         try:
             total_time = (datetime.now() - self.start_time).total_seconds()
             msg = "{} t:{:.3f}".format( msg, total_time )
@@ -1012,3 +1016,5 @@ class afcDeltaTime:
             self.logger.info( msg )
         except Exception as e:
             self.logger.debug("Error in log_total_time function {}".format(e))
+        
+        return total_time

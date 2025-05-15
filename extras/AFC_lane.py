@@ -15,19 +15,19 @@ try:
     )
 except:
     raise error("Error trying to import AFC_utils, please rerun install-afc.sh script in your AFC-Klipper-Add-On directory then restart klipper")
-class AFCLaneStats:
-    def __init__(self, lane_name, lane_obj):
-        afc_stats = lane_obj.afc.moonraker.get_afc_stats()
-        if afc_stats is not None:
-            values = ["values"]
-        else:
-            values = None
-        self.n20_runtime       = AFCStats_var(lane_name, "n20_runtime", values, lane_obj.afc.moonraker)
-        self.lane_change_count = AFCStats_var(lane_name, "change_count", values, lane_obj.afc.moonraker)
+# class AFCLaneStats:
+#     def __init__(self, lane_name, lane_obj):
+#         afc_stats = lane_obj.afc.moonraker.get_afc_stats()
+#         if afc_stats is not None:
+#             values = ["values"]
+#         else:
+#             values = None
+#         self.n20_runtime       = AFCStats_var(lane_name, "n20_runtime", values, lane_obj.afc.moonraker)
+#         self.lane_change_count = AFCStats_var(lane_name, "change_count", values, lane_obj.afc.moonraker)
     
-    def increment_lane_count(self):
-        self.lane_change_count.increase_count()
-        return
+#     def increment_lane_count(self):
+#         self.lane_change_count.increase_count()
+#         return
 
 class AFCLane:
     def __init__(self, config):
@@ -119,6 +119,7 @@ class AFCLane:
         else: self.load_state = True
 
         self.espooler = AFC_assist.Espooler(self.name, config)
+        self.lane_load_count = None
 
         self.filament_diameter  = config.getfloat("filament_diameter", 1.75)    # Diameter of filament being used
         self.filament_density   = config.getfloat("filament_density", 1.24)     # Density of filament being used
@@ -162,6 +163,7 @@ class AFCLane:
             error_string, led = self.afc.function.verify_led_object(self.led_index)
             if led is None:
                 raise error(error_string)
+        self.espooler.handle_ready()
 
     def handle_unit_connect(self, unit_obj):
         """
@@ -180,7 +182,10 @@ class AFCLane:
             self.unit_obj.lanes[self.name] = self
             self.afc.lanes[self.name] = self
 
-            self.lane_stats = AFCLaneStats(self.name, self)
+            values = None
+            if self.afc.moonraker.afc_stats is not None:
+                values = self.afc.moonraker.afc_stats["value"]
+            self.lane_load_count = AFCStats_var(self.name, "load_count", values, self.afc.moonraker)
 
         self.hub_obj = self.unit_obj.hub_obj
 

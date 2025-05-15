@@ -7,6 +7,7 @@
 # File is used to hold common functions that can be called from anywhere and don't belong to a class
 import json
 from sys import settrace
+from datetime import datetime
 
 from urllib import request
 from urllib.request import (
@@ -52,6 +53,7 @@ class AFC_moonraker:
         self.local_host = 'http://localhost{port}'.format( port=port )
         self.database_url = urljoin(self.local_host, "server/database/item")
         self.data_array = {"namespace":"afc_stats", "key":"", "value":""}
+        self.afc_stats_values = None
 
     def _get_results(self, url_string):
         try:
@@ -80,8 +82,10 @@ class AFC_moonraker:
         resp = self._get_results(urljoin(self.database_url, "?namespace=afc_stats"))
         if resp is None:
             self.logger.info("AFC_stats not in database")
+        else:
+            self.afc_stats = resp['result']
         
-        return resp
+        return self.afc_stats
     
     def update_afc_stats(self, key, value):
         post_payload = {
@@ -118,7 +122,14 @@ class AFCStats_var:
         self.moonraker   = moonraker
 
         if data is not None and self.parent_name in data:
-            self._value = check_and_return( self.name, data[self.parent_name])
+            value = check_and_return( self.name, data[self.parent_name])
+            try:
+                self._value = int(value)
+            except ValueError:
+                try :
+                    self._value = float(value)
+                except:
+                    self._value = value
         else:
             self._value = 0
             self.update_database()
@@ -128,19 +139,24 @@ class AFCStats_var:
     @value.setter
     def value(self, value):
         self._value = value
-        self.update_database()
+    
+    def average_time(self, value):
+        if self._value > 0:
+            self._value += value
+            self._value /= 2
+        else:
+            self._value = value
     
     def increase_count(self):
-        self.value += 1
+        self._value += 1
         self.update_database()
     
     def reset_count(self):
-        self.value = 0
+        self._value = 0
         self.update_database()
     
     def update_database(self):
-        self.moonraker.update_afc_stats(f"{self.parent_name}.{self.name}", self.value)
-        return
+        self.moonraker.update_afc_stats(f"{self.parent_name}.{self.name}", self._value)
     
     def set_current_time(self):
         from datetime import datetime
@@ -155,7 +171,7 @@ class AFCStats:
         afc_stats = self.moonraker.get_afc_stats()
         
         if afc_stats is not None:
-            values = ["values"]
+            values = afc_stats["value"]
         else:
             values = None
 
@@ -170,27 +186,46 @@ class AFCStats:
 
         self.cut_total                  = AFCStats_var("cut", "cut_total", values, self.moonraker)
         self.cut_total_since_changed    = AFCStats_var("cut", "cut_total_since_changed", values, self.moonraker)
-        self.last_blade_changed         = AFCStats_var("cut", "last_blade_changed", values, self.moonraker)
+        self.last_blade_changed         = AFCStats_var("cut", "last_blade_changed", values, self.moonraker) # TODO
         # self.cut_threshold_for_warning  = AFCStats_var("cut", "cut_total", values, self.moonraker)
 
         self.average_toolchange_time    = AFCStats_var("average_time", "tool_change", values, self.moonraker)
         self.average_tool_unload_time   = AFCStats_var("average_time", "tool_unload", values, self.moonraker)
         self.average_tool_load_time     = AFCStats_var("average_time", "tool_load",   values, self.moonraker)
+    
+    def increase_cut_total(self):
+        self.cut_total.increase_count()
+        self.cut_total_since_changed.increase_count()
+
+    def increase_toolcount_change(self):
+        self.tc_total.increase_count()
+        self.tc_without_error.increase_count()
+    
+    def reset_toolchange_wo_error(self):
+        self.tc_without_error.reset_count()
+        self.tc_last_load_error.set_current_time()
 
     def print_stats(self, afc_obj):
+        avg_tool_load   = f"Avg Tool Load: {self.average_tool_load_time.value:4.2f}s"
+        avg_tool_unload = f"Avg Tool Unload: {self.average_tool_unload_time.value:4.2f}s"
+        avg_tool_change = f"Avg Tool Change: {self.average_toolchange_time.value:4.2f}s"
+        blade_change = "2025-05-13 21:06"
         
-        print_str  = f"{'':{'-'}<87}\n"
-        print_str += f"|{'Toolchanges':{' '}^42}|{'Cut':{' '}^42}|\n"
-        print_str += f"|{'':{'-'}<85}|\n"
-        print_str += f"|{'Total':{' '}>22} : {self.tc_total.value:{' '}<17}|{'Total':{' '}>22} : {self.cut_total.value:{''}<17}|\n"
-        print_str += f"|{'Tool Unload':{' '}>22} : {self.tc_tool_unload.value:{' '}<17}|{'Total since changed':{' '}>22} : {self.cut_total_since_changed.value:{''}<17}|\n"
-        print_str += f"|{'Tool Load':{' '}>22} : {self.tc_tool_load.value:{' '}<17}|{'Blade last changed':{' '}>22} : {self.last_blade_changed.value:{''}<17}|\n"
-        print_str += f"|{'Changes without error':{' '}>22} : {self.tc_without_error.value:{' '}<17}|{'':{''}<42}|\n"
-        print_str += f"|{'Last error date':{' '}>22} : {self.tc_last_load_error.value:{' '}<17}|{'':{''}<42}|\n"
-        print_str += f"{'':{'-'}<87}\n"
+        print_str  = f"{'':{'-'}<86}\n"
+        print_str += f"|{'Toolchanges':{' '}^42}|{'Cut':{' '}^41}|\n"
+        print_str += f"|{'':{'-'}<84}|\n"
+        print_str += f"|{'Total':{' '}>22} : {self.tc_total.value:{' '}<17}|{'Total':{' '}>21} : {self.cut_total.value:{''}<17}|\n"
+        print_str += f"|{'Tool Unload':{' '}>22} : {self.tc_tool_unload.value:{' '}<17}|{'Total since changed':{' '}>21} : {self.cut_total_since_changed.value:{''}<17}|\n"
+        print_str += f"|{'Tool Load':{' '}>22} : {self.tc_tool_load.value:{' '}<17}|{'Blade last changed':{' '}>21} : {blade_change:{''}<17}|\n"
+        print_str += f"|{'Changes without error':{' '}>22} : {self.tc_without_error.value:{' '}<17}|{'':{''}<41}|\n"
+        print_str += f"|{'Last error date':{' '}>22} : {self.tc_last_load_error.value:{' '}<17}|{'':{''}<41}|\n"
+        print_str += f"{'':{'-'}<86}\n"
+        print_str += f"|{avg_tool_load:{' '}^27}|{avg_tool_unload:{' '}^27}|{avg_tool_change:{' '}^28}|\n"
+        print_str += f"{'':{'-'}<86}\n"
 
         for lane in afc_obj.lanes.values():
-            print_str += f"| {lane.name:{' '}>7} : N20 runtime: {lane.lane_stats.n20_runtime.value:{' '}>6}                Lane change count: {lane.lane_stats.lane_change_count.value:{' '}>6}\n"
+            print_str += f"| {lane.name:{' '}>7} : Lane change count: {lane.lane_load_count.value:{' '}>6}    N20 active time: FWD-{lane.espooler.stats.n20_runtime_fwd:>8} RWD-{lane.espooler.stats.n20_runtime_rwd:>8}  |\n"
+        print_str += f"{'':{'-'}<86}\n"
         afc_obj.logger.raw(print_str)
 
 

@@ -244,8 +244,6 @@ class afc:
             self.moonraker = AFC_moonraker( moonraker_port, self.logger )
             self.spoolman = self.moonraker.get_spoolman_server()
             self.afc_stats = AFCStats(self.moonraker)
-            self.afc_stats.tc_total.increase_count()
-            self.afc_stats.tc_total.value = -1
         except Exception as e:
             self.logger.debug("Spoolman error: {}".format(e))
             self.spoolman = None                      # set to none if not found
@@ -988,11 +986,13 @@ class afc:
             self.function.afc_led(cur_lane.led_tool_loaded, cur_lane.led_index)
             self.save_vars()
             self.current_state = State.IDLE
-            self.afcDeltaTime.log_major_delta("{} is now loaded in toolhead".format(cur_lane.name), False)
+            load_time = self.afcDeltaTime.log_major_delta("{} is now loaded in toolhead".format(cur_lane.name), False)
+            self.afc_stats.average_tool_load_time.average_time(load_time)
 
             # Increment stat counts
             self.afc_stats.tc_load.increase_count()
-            cur_lane.lane_stats.increment_lane_count()
+            cur_lane.lane_load_count.increase_count()
+            cur_lane.espooler.stats.update_database()
 
         else:
             # Handle errors if the hub is not clear or the lane is not ready for loading.
@@ -1110,6 +1110,7 @@ class afc:
 
         # Perform filament cutting and parking if specified.
         if self.tool_cut:
+            self.afc_stats.increase_cut_total()
             self.gcode.run_script_from_command(self.tool_cut_cmd)
             self.afcDeltaTime.log_with_time("TOOL_UNLOAD: After cut")
             self.function.log_toolhead_pos()
@@ -1267,9 +1268,11 @@ class afc:
         cur_lane.unit_obj.return_to_home()
 
         self.afc_stats.tc_tool_unload.increase_count()
+        cur_lane.espooler.stats.update_database()
 
         self.save_vars()
-        self.afcDeltaTime.log_major_delta("Lane {} unload done".format(cur_lane.name))
+        unload_time = self.afcDeltaTime.log_major_delta("Lane {} unload done".format(cur_lane.name))
+        self.afc_stats.average_tool_unload_time.average_time(unload_time)
         self.current_state = State.IDLE
         return True
 
@@ -1369,12 +1372,17 @@ class afc:
 
             # Load the new lane and restore the toolhead position if successful.
             if self.TOOL_LOAD(cur_lane, purge_length) and not self.error_state:
-                self.afcDeltaTime.log_total_time("Total change time:")
+                total_time = self.afcDeltaTime.log_total_time("Total change time:")
+                self.afc_stats.average_toolchange_time.average_time(total_time)
                 if restore_pos:
                     self.restore_pos()
                 self.in_toolchange = False
                 # Setting next lane load as none since toolchange was successful
                 self.next_lane_load = None
+                self.afc_stats.increase_toolcount_change()
+            else:
+                # Error happened, reset toolchanges without error count
+                self.afc_stats.reset_toolchange_wo_error()
         else:
             self.logger.info("{} already loaded".format(cur_lane.name))
             if not self.error_state and self.current_toolchange == -1: #and self.number_of_toolchanges != 0 and self.current_toolchange != self.number_of_toolchanges:

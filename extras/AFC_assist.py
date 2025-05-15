@@ -10,6 +10,8 @@ PIN_MIN_TIME = 0.100
 RESEND_HOST_TIME = 0.300 + PIN_MIN_TIME
 MAX_SCHEDULE_TIME = 5.0
 
+from extras.AFC_utils import AFCStats_var
+
 class AFCassistMotor:
     def __init__(self, config, type):
         self.printer = config.get_printer()
@@ -83,6 +85,97 @@ class AFCassistMotor:
             return systime + time_diff
         self._set_pin(print_time + PIN_MIN_TIME, self.last_value, True)
         return systime + self.resend_interval
+
+class EspoolerDir:
+    FWD = "Fowards"
+    RWD = "Reverse" 
+
+class AFCEspoolerStats:
+    def __init__(self, espooler_name, espooler_obj):
+        afc_stats = espooler_obj.afc.moonraker.get_afc_stats()
+        if afc_stats is not None:
+            values = afc_stats["value"]
+        else:
+            values = None
+        self._n20_runtime_fwd   = AFCStats_var(espooler_name, "n20_runtime_fwd", values, espooler_obj.afc.moonraker)
+        self._n20_runtime_rwd   = AFCStats_var(espooler_name, "n20_runtime_rwd", values, espooler_obj.afc.moonraker)
+        self._fwd_updated       = False
+        self._rwd_updated       = False
+        self._direction         = None
+        self._direction_start   = None
+        self._direction_end     = None
+        self._delta             = None
+        self.logger = espooler_obj.logger
+    
+    def _convert_value(self, value):
+        unit = 's'
+        if value > 9999:
+            value /=60
+            unit = 'm'
+        
+        if value > 9999:
+            value /= 60
+            unti = 'h'
+        return value, unit
+
+    @property
+    def n20_runtime_fwd(self):
+        val, unit = self._convert_value(self._n20_runtime_fwd.value)
+        return f"{val:.2f}{unit}"
+    @property
+    def n20_runtime_rwd(self):
+        val, unit = self._convert_value(self._n20_runtime_rwd.value)
+        return f"{val:.2f}{unit}"
+
+    @property
+    def direction(self):
+        return self._direction
+    @direction.setter
+    def direction(self, value):
+        if self._direction is None:
+            self._direction = value
+
+    @property
+    def start_time(self):
+        return self._direction_start
+    @start_time.setter
+    def start_time(self, eventtime):
+        if self._direction_start is None:
+            self._direction_start = eventtime
+
+    @property
+    def end_time(self):
+        return self._direction_end
+    @end_time.setter
+    def end_time(self, eventtime):
+
+        self.logger.info(f"End time :{self._direction_end} {self._direction_start} {self._direction}")
+        if self._direction is None and self._direction_end is None and \
+           self._direction_start is None:
+            return
+        
+        self._direction_end = eventtime
+
+        if self._direction_end > self._direction_start:
+            self._delta = self._direction_end - self._direction_start
+
+            if self._direction == EspoolerDir.FWD:
+                self._n20_runtime_fwd.value += self._delta
+                self._fwd_updated      = True
+            else:
+                self._n20_runtime_rwd.value += self._delta
+                self._rwd_updated      = True
+
+        self._direction = self._direction_start = self._direction_end = None
+
+    def update_database(self):
+        if self._fwd_updated:
+            self._n20_runtime_fwd.update_database()
+            self._fwd_updated = False
+        
+        if self._rwd_updated:
+            self._n20_runtime_rwd.update_database()
+            self._rwd_updated = False
 
 class Espooler_values:
     """
@@ -238,6 +331,7 @@ class Espooler:
         self.logger                 = self.afc.logger
         self.reactor                = self.printer.get_reactor()
         self.callback_timer         = self.reactor.register_timer( self.timer_callback )    # Defaults to never trigger
+        self.stats_timer            = self.reactor.register_timer( self.timer_stats_callback )
 
         self.afc_motor_rwd          = config.get("afc_motor_rwd", None)                     # Reverse pin on MCU for spoolers
         self.afc_motor_fwd          = config.get("afc_motor_fwd", None)                     # Forwards pin on MCU for spoolers
@@ -261,6 +355,7 @@ class Espooler:
         self.past_extruder_position = -1
 
         self.espooler_values        = Espooler_values(config)
+        self.stats                  = None
 
         if self.afc_motor_rwd is not None:
             self.afc_motor_rwd = AFCassistMotor(config, "rwd")
@@ -273,6 +368,9 @@ class Espooler:
             self.afc.gcode.register_mux_command("DISABLE_ESPOOLER_ASSIST"   , "LANE", self.name, self.cmd_DISABLE_ESPOOLER_ASSIST,  desc=self.cmd_DISABLE_ESPOOLER_ASSIST_help)
         if self.afc_motor_enb is not None:
             self.afc_motor_enb = AFCassistMotor(config, "enb")
+    
+    def handle_ready(self):
+        self.reactor.update_timer( self.stats_timer, self.reactor.monotonic() + 30 )
 
     def handle_connect(self, lane_obj):
         """
@@ -280,12 +378,20 @@ class Espooler:
         lane this function will update values from their unit.
         """
         self.espooler_values.handle_connect(lane_obj)
+        self.stats = AFCEspoolerStats(self.name, self)
 
         if self.n20_break_delay_time    is None: self.n20_break_delay_time  = lane_obj.unit_obj.n20_break_delay_time
         if self.timer_delay             is None: self.timer_delay           = lane_obj.unit_obj.timer_delay
         if self.enable_assist           is None: self.enable_assist         = lane_obj.unit_obj.enable_assist
         if self.debug                   is None: self.debug                 = lane_obj.unit_obj.debug
         if self.enable_kick_start       is None: self.enable_kick_start     = lane_obj.unit_obj.enable_kick_start
+
+
+    def timer_stats_callback(self, eventtime):
+        if not self.afc.function.is_printing(True):
+            self.stats.update_database()
+
+        return self.reactor.monotonic() + 30
 
     def timer_callback(self, eventtime):
         """
@@ -337,6 +443,10 @@ class Espooler:
         """
         if self.afc_motor_enb is not None:
             self.afc_motor_enb._set_pin( print_time, value)
+            if value == 0:
+                self.stats.end_time = print_time
+            else:
+                self.stats.start_time = print_time
 
     def do_assist_move(self, movement=100):
         """
@@ -363,6 +473,7 @@ class Espooler:
         :param print_time: This value should be a float and is a time when to set the pin
         :param value: This value should be a float between 0.0 and 1.0
         """
+        self.stats.direction = EspoolerDir.FWD
         self.set_enable_pin(print_time, 1)
         self.afc_motor_fwd._set_pin(print_time, value)
 
@@ -373,6 +484,7 @@ class Espooler:
         :param print_time: This value should be a float and is a time when to set the pin
         :param value: This value should be a float between 0.0 and 1.0
         """
+        self.stats.direction = EspoolerDir.RWD
         self.set_enable_pin(print_time, 1)
         self.afc_motor_rwd._set_pin(print_time, value)
 
@@ -392,9 +504,11 @@ class Espooler:
             value *= -1
             assist_motor=self.afc_motor_rwd
             reverse = True
+            self.stats.direction = EspoolerDir.RWD
         elif value > 0:
             if self.afc_motor_fwd is None:
                 return
+            self.stats.direction = EspoolerDir.FWD
             assist_motor=self.afc_motor_fwd
         elif value == 0:
             self.break_espooler()
