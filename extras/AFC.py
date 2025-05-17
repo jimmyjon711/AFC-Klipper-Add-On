@@ -6,23 +6,23 @@
 
 import json
 import re
+import traceback
 from configfile import error
 from typing import Any
 
-try:
-    from urllib.request import urlopen
-except:
-    # Python 2.7 support
-    from urllib2 import urlopen
+ERROR_STR = "Error trying to import {import_lib}, please rerun install-afc.sh script in your AFC-Klipper-Add-On directory then restart klipper\n\n{trace}"
 
 try: from extras.AFC_logger import AFC_logger
-except: raise error("Error trying to import AFC_logger, please rerun install-afc.sh script in your AFC-Klipper-Add-On directory then restart klipper")
+except: raise error(ERROR_STR.format(import_lib="AFC_logger", trace=traceback.format_exc()))
 
 try: from extras.AFC_functions import afcDeltaTime
-except: raise error("Error trying to import afcDeltaTime, please rerun install-afc.sh script in your AFC-Klipper-Add-On directory then restart klipper")
+except: raise error(ERROR_STR.format(import_lib="AFC_functions", trace=traceback.format_exc()))
 
-try: from extras.AFC_utils import add_filament_switch, AFC_moonraker, AFCStats
-except: raise error("Error trying to import AFC_utils, please rerun install-afc.sh script in your AFC-Klipper-Add-On directory then restart klipper")
+try: from extras.AFC_utils import add_filament_switch, AFC_moonraker
+except: raise error(ERROR_STR.format(import_lib="AFC_utils", trace=traceback.format_exc()))
+
+try: from extras.AFC_stats import AFCStats
+except: raise error(ERROR_STR.format(import_lib="AFC_stats", trace=traceback.format_exc()))
 
 AFC_VERSION="1.0.12"
 
@@ -128,6 +128,7 @@ class afc:
         # TOOL Cutting Settings
         self.tool                   = ''
         self.tool_cut               = config.getboolean("tool_cut", False)          # Set to True to enable toolhead cutting
+        self.tool_cut_threshold     = config.getint("tool_cut_threshold", 10000)
         self.tool_cut_cmd           = config.get('tool_cut_cmd', None)              # Macro to use when doing toolhead cutting. Change macro name if you would like to use your own cutting macro
 
         # CHOICES
@@ -243,7 +244,7 @@ class afc:
         try:
             self.moonraker = AFC_moonraker( moonraker_port, self.logger )
             self.spoolman = self.moonraker.get_spoolman_server()
-            self.afc_stats = AFCStats(self.moonraker)
+            self.afc_stats = AFCStats(self.moonraker, self.logger, self.tool_cut_threshold)
         except Exception as e:
             self.logger.debug("Spoolman error: {}".format(e))
             self.spoolman = None                      # set to none if not found
@@ -262,7 +263,8 @@ class afc:
         self.gcode.register_command('UNSET_LANE_LOADED',    self.cmd_UNSET_LANE_LOADED,     desc=self.cmd_UNSET_LANE_LOADED_help)
         self.gcode.register_command('TURN_OFF_AFC_LED',     self.cmd_TURN_OFF_AFC_LED,      desc=self.cmd_TURN_OFF_AFC_LED_help)
         self.gcode.register_command('TURN_ON_AFC_LED',      self.cmd_TURN_ON_AFC_LED,       desc=self.cmd_TURN_ON_AFC_LED_help)
-        self.gcode.register_command("PRINT_AFC_STATS",      self.cmd_PRINT_AFC_STATS)
+        self.gcode.register_command("AFC_STATS",            self.cmd_AFC_STATS,             desc=self.cmd_AFC_STATS_help)
+        self.gcode.register_command("AFC_CHANGE_BLADE",     self.cmd_AFC_CHANGE_BLADE,      desc=self.cmd_AFC_CHANGE_BLADE_help)
         self.current_state = State.IDLE
 
     def print_version(self, console_only=False):
@@ -990,7 +992,7 @@ class afc:
             self.afc_stats.average_tool_load_time.average_time(load_time)
 
             # Increment stat counts
-            self.afc_stats.tc_load.increase_count()
+            self.afc_stats.tc_tool_load.increase_count()
             cur_lane.lane_load_count.increase_count()
             cur_lane.espooler.stats.update_database()
 
@@ -1372,10 +1374,10 @@ class afc:
 
             # Load the new lane and restore the toolhead position if successful.
             if self.TOOL_LOAD(cur_lane, purge_length) and not self.error_state:
-                total_time = self.afcDeltaTime.log_total_time("Total change time:")
-                self.afc_stats.average_toolchange_time.average_time(total_time)
                 if restore_pos:
                     self.restore_pos()
+                total_time = self.afcDeltaTime.log_total_time("Total change time:")
+                self.afc_stats.average_toolchange_time.average_time(total_time)
                 self.in_toolchange = False
                 # Setting next lane load as none since toolchange was successful
                 self.next_lane_load = None
@@ -1578,5 +1580,45 @@ class afc:
         for led in self.led_obj.values():
             led.turn_on_leds()
 
-    def cmd_PRINT_AFC_STATS(self, gcmd):
-        self.afc_stats.print_stats(self)
+    cmd_AFC_STATS_help ="Prints AFC toolchange statistics to console"
+    def cmd_AFC_STATS(self, gcmd):
+        """
+        This macro handles printing toolchange statistics to console.
+
+        Optional Values
+        ----
+        Set SHORT=1 to have a smaller print that fits better on smaller screens
+
+        Usage
+        -----
+        `AFC_STATS SHORT=<1|0>`
+
+        Example
+        -----
+        ```
+        AFC_STATS
+        ```
+        """
+        short = bool(gcmd.get_int("SHORT", 0))
+
+        self.afc_stats.print_stats(afc_obj=self, short=short)
+
+    cmd_AFC_CHANGE_BLADE_help = "Sets cutter blade changed date and resets total count since blade was changed"
+    def cmd_AFC_CHANGE_BLADE(self, gcmd):
+        """
+        This macro handles resetting cut total since blade was last changed and updates the data
+        the blade was last changed to current date time when this macro was ran.
+
+        Usage
+        -----
+        `AFC_CHANGE_BLADE`
+
+        Example
+        -----
+        ```
+        AFC_CHANGE_BLADE
+        ```
+        """
+        self.afc_stats.last_blade_changed.set_current_time()
+        self.afc_stats.cut_total_since_changed.reset_count()
+        self.logger.info("Cutter blade stats reset")

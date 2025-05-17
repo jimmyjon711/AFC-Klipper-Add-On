@@ -6,12 +6,15 @@
 
 import os
 import re
+import traceback
+
 from configfile import error
 from datetime import datetime
-try:
-    from extras.AFC_respond import AFCprompt
-except:
-    raise error("Error trying to import AFC_respond, please rerun install-afc.sh script in your AFC-Klipper-Add-On directory then restart klipper")
+
+from extras.AFC import ERROR_STR
+
+try: from extras.AFC_respond import AFCprompt
+except: raise error(ERROR_STR.format(import_lib="AFC_respond", trace=traceback.format_exc()))
 
 def load_config(config):
     return afcFunction(config)

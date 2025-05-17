@@ -4,13 +4,18 @@
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import math
+import traceback
 
 #respooler
 PIN_MIN_TIME = 0.100
 RESEND_HOST_TIME = 0.300 + PIN_MIN_TIME
 MAX_SCHEDULE_TIME = 5.0
+from configfile import error
+from extras.AFC import ERROR_STR
 
-from extras.AFC_utils import AFCStats_var
+
+try: from extras.AFC_stats import AFCStats_var
+except: raise error(ERROR_STR.format(import_lib="AFC_stats", trace=traceback.format_exc()))
 
 class AFCassistMotor:
     def __init__(self, config, type):
@@ -87,7 +92,7 @@ class AFCassistMotor:
         return systime + self.resend_interval
 
 class EspoolerDir:
-    FWD = "Fowards"
+    FWD = "Forwards"
     RWD = "Reverse" 
 
 class AFCEspoolerStats:
@@ -115,7 +120,7 @@ class AFCEspoolerStats:
         
         if value > 9999:
             value /= 60
-            unti = 'h'
+            unit = 'h'
         return value, unit
 
     @property
@@ -149,7 +154,6 @@ class AFCEspoolerStats:
     @end_time.setter
     def end_time(self, eventtime):
 
-        self.logger.info(f"End time :{self._direction_end} {self._direction_start} {self._direction}")
         if self._direction is None and self._direction_end is None and \
            self._direction_start is None:
             return
@@ -370,7 +374,10 @@ class Espooler:
             self.afc_motor_enb = AFCassistMotor(config, "enb")
     
     def handle_ready(self):
-        self.reactor.update_timer( self.stats_timer, self.reactor.monotonic() + 30 )
+        if self.afc_motor_fwd is not None or self.afc_motor_rwd is not None:
+            self.reactor.update_timer( self.stats_timer, self.reactor.monotonic() + 30 )
+        else:
+            self.logger.info(f"Not starting timer for {self.name}")
 
     def handle_connect(self, lane_obj):
         """
@@ -385,7 +392,6 @@ class Espooler:
         if self.enable_assist           is None: self.enable_assist         = lane_obj.unit_obj.enable_assist
         if self.debug                   is None: self.debug                 = lane_obj.unit_obj.debug
         if self.enable_kick_start       is None: self.enable_kick_start     = lane_obj.unit_obj.enable_kick_start
-
 
     def timer_stats_callback(self, eventtime):
         if not self.afc.function.is_printing(True):
@@ -571,6 +577,27 @@ class Espooler:
 
         self.past_extruder_position = -1
         self.reactor.update_timer( self.callback_timer, self.reactor.NEVER)
+    
+    def get_spooler_stats(self, short=False):
+        ret_str = "N20 active time:"
+
+        if self.afc_motor_fwd is None and self.afc_motor_rwd is None:
+            ret_str = ""
+
+        if self.afc_motor_fwd is not None:
+            if short:
+                ret_str += " fwd:"
+                ret_str = f"{ret_str:{' '}>31}{self.stats.n20_runtime_fwd:>8}   |\n"
+            else:
+                ret_str += f" fwd:{self.stats.n20_runtime_fwd:>8}"
+        
+        if self.afc_motor_rwd is not None:
+            if short:
+                ret_str += "|" + f"{'rwd:':{' '}>31}{self.stats.n20_runtime_rwd:>8}   "
+            else:
+                ret_str += f" rwd:{self.stats.n20_runtime_rwd:>8}"
+        
+        return ret_str
 
     ### MACROS ###
     cmd_TEST_ESPOOLER_ASSIST_help="Test espooler print assist for a specified lane"
