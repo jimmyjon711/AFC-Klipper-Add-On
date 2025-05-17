@@ -6,16 +6,16 @@
 import math
 import traceback
 
+from configfile import error
+from extras.AFC import ERROR_STR
+
+try: from extras.AFC_stats import AFCStats_var
+except: raise error(ERROR_STR.format(import_lib="AFC_stats", trace=traceback.format_exc()))
+
 #respooler
 PIN_MIN_TIME = 0.100
 RESEND_HOST_TIME = 0.300 + PIN_MIN_TIME
 MAX_SCHEDULE_TIME = 5.0
-from configfile import error
-from extras.AFC import ERROR_STR
-
-
-try: from extras.AFC_stats import AFCStats_var
-except: raise error(ERROR_STR.format(import_lib="AFC_stats", trace=traceback.format_exc()))
 
 class AFCassistMotor:
     def __init__(self, config, type):

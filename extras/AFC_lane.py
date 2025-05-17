@@ -4,6 +4,8 @@
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import math
+import traceback
+
 from contextlib import contextmanager
 from configfile import error
 
@@ -13,8 +15,7 @@ try:
         add_filament_switch,
         AFCStats_var
     )
-except:
-    raise error("Error trying to import AFC_utils, please rerun install-afc.sh script in your AFC-Klipper-Add-On directory then restart klipper")
+except: raise error(ERROR_STR.format(import_lib="AFC_utils", trace=traceback.format_exc()))
 
 class AFCLane:
     def __init__(self, config):
