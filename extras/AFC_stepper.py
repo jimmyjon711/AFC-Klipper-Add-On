@@ -14,7 +14,7 @@ from extras.force_move import calc_move_time
 from extras.AFC import ERROR_STR
 
 try: from extras.AFC_lane import AFCLane
-except: raise error(ERROR_STR.format(import_lib="AFC_utils", trace=traceback.format_exc()))
+except: raise error(ERROR_STR.format(import_lib="AFC_lane", trace=traceback.format_exc()))
 
 class AFCExtruderStepper(AFCLane):
     def __init__(self, config):

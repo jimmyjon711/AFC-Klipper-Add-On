@@ -10,7 +10,7 @@ from configparser import Error as error
 from extras.AFC import ERROR_STR
 
 try: from extras.AFC_BoxTurtle import afcBoxTurtle
-except: raise error(ERROR_STR.format(import_lib="AFC_utils", trace=traceback.format_exc()))
+except: raise error(ERROR_STR.format(import_lib="AFC_BoxTurtle", trace=traceback.format_exc()))
 
 class afcNightOwl(afcBoxTurtle):
     def __init__(self, config):

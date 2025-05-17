@@ -9,6 +9,8 @@ import traceback
 from contextlib import contextmanager
 from configfile import error
 
+from extras.AFC import ERROR_STR
+
 from . import AFC_assist
 try:
     from extras.AFC_utils import (
