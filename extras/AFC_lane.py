@@ -293,7 +293,7 @@ class AFCLane:
 
         self.hub_obj = self.unit_obj.hub_obj
 
-        if not self.is_direct_hub():
+        if self.hub != 'direct_load':
             if self.hub is not None:
                 try:
                     self.hub_obj = self.printer.lookup_object("AFC_hub {}".format(self.hub))
@@ -487,9 +487,6 @@ class AFCLane:
                 return self.short_moves_speed, self.short_moves_accel
             else:
                 return self.dist_hub_move_speed, self.dist_hub_move_accel
-    def is_direct_hub(self):
-        return self.hub and 'direct' in self.hub
-    
     def select_lane(self):
         self.unit_obj.select_lane( self )
 
@@ -629,7 +626,7 @@ class AFCLane:
                 self.afc.spool._set_values(self)
                 # Check if user wants to get TD-1 data when loading
                 self._prep_capture_td1()
-                if self.is_direct_hub():
+                if self.hub == 'direct_load':
                     self.afc.afcDeltaTime.set_start_time()
                     success = self.afc.TOOL_LOAD(self)
                     if not success:
@@ -668,7 +665,7 @@ class AFCLane:
         if self.prep_active:
             return
 
-        if self.printer.state_message == 'Printer is ready' and self.is_direct_hub() and not self.afc.function.is_homed():
+        if self.printer.state_message == 'Printer is ready' and self.hub == 'direct_load' and not self.afc.function.is_homed():
             self.afc.error.AFC_error("Please home printer before directly loading to toolhead", False)
             return False
 
@@ -709,7 +706,7 @@ class AFCLane:
 
                     # Verify that load state is still true as this would still trigger if prep sensor was triggered and then filament was removed
                     #   This is only really a issue when using direct_load and still using load sensor
-                    if self.is_direct_hub() and self.prep_state:
+                    if self.hub == 'direct_load' and self.prep_state:
                         self.logger.debug(f"Prep: direct load logic-{self.name}-{self.hub}")
                         self.afc.afcDeltaTime.set_start_time()
                         # Populate spool defaults (or assign the next Spoolman ID)
@@ -727,7 +724,7 @@ class AFCLane:
                         break
 
                     # Checking if loaded to hub(it should not be since filament was just inserted), if false load to hub. Does a fast load if hub distance is over 200mm
-                    if self.load_to_hub and not self.loaded_to_hub and self.load_state and self.prep_state and not self.is_direct_hub():
+                    if self.load_to_hub and not self.loaded_to_hub and self.load_state and self.prep_state and self.hub != 'direct_load':
                         self.move(self.dist_hub, self.dist_hub_move_speed, self.dist_hub_move_accel, self.dist_hub > 200)
                         self.loaded_to_hub = True
 
