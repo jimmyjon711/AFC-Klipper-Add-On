@@ -487,7 +487,19 @@ class AFCLane:
                 return self.short_moves_speed, self.short_moves_accel
             else:
                 return self.dist_hub_move_speed, self.dist_hub_move_accel
+
+    def is_direct_hub(self):
+        """
+        Helper function to see if hub for lane is 'direct' or 'direct_load' hub.
+
+        :return boolean: True if hub for lane is 'direct' or 'direct_load'
+        """
+        return self.hub and 'direct' in self.hub
+
     def select_lane(self):
+        """
+        Helper function to select lane, calls unit lane selection function.
+        """
         self.unit_obj.select_lane( self )
 
     def move(self, distance, speed, accel, assist_active=False):
