@@ -29,7 +29,7 @@ class afc_hub:
 
         # HUB Cut variables
         # Next two variables are used in AFC
-        self.switch_pin             = config.get('switch_pin')                      # Pin hub sensor it connected to
+        self.switch_pin             = config.get('switch_pin', None)                # Pin hub sensor it connected to
         self.hub_clear_move_dis     = config.getfloat("hub_clear_move_dis", 25)     # How far to move filament so that it's not block the hub exit
         self.afc_bowden_length      = config.getfloat("afc_bowden_length", 900)     # Length of the Bowden tube from the hub to the toolhead sensor in mm.
         self.td1_bowden_length      = config.getfloat("td1_bowden_length", self.afc_bowden_length-50)     # Length of the Bowden tube from the hub to a TD-1 device in mm.
