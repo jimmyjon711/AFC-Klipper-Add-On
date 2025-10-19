@@ -293,7 +293,7 @@ class AFCLane:
 
         self.hub_obj = self.unit_obj.hub_obj
 
-        if not self.is_direct_hub():
+        if self.hub != 'direct_load':
             if self.hub is not None:
                 try:
                     self.hub_obj = self.printer.lookup_object("AFC_hub {}".format(self.hub))
@@ -487,9 +487,6 @@ class AFCLane:
                 return self.short_moves_speed, self.short_moves_accel
             else:
                 return self.dist_hub_move_speed, self.dist_hub_move_accel
-    def is_direct_hub(self):
-        return self.hub and 'direct' in self.hub
-    
     def select_lane(self):
         self.unit_obj.select_lane( self )
 
@@ -631,7 +628,11 @@ class AFCLane:
                 self._prep_capture_td1()
                 if self.hub == 'direct_load':
                     self.afc.afcDeltaTime.set_start_time()
-                    self.afc.TOOL_LOAD(self)
+                    success = self.afc.TOOL_LOAD(self)
+                    if not success:
+                        self.afc.spool.clear_values(self)
+                        self.status = AFCLaneState.NONE
+                        self.unit_obj.lane_unloaded(self)
                     self.material = self.afc.default_material_type
             else:
                 # Don't run if user disabled sensor in gui
@@ -650,6 +651,7 @@ class AFCLane:
                     self.loaded_to_hub = False
                     self.td1_data = {}
                     self.afc.spool.clear_values(self)
+                    self.unit_obj.lane_unloaded(self)
                     self.afc.function.afc_led(self.afc.led_not_ready, self.led_index)
 
         self.afc.save_vars()
@@ -663,7 +665,7 @@ class AFCLane:
         if self.prep_active:
             return
 
-        if self.printer.state_message == 'Printer is ready' and self.is_direct_hub() and not self.afc.function.is_homed():
+        if self.printer.state_message == 'Printer is ready' and self.hub == 'direct_load' and not self.afc.function.is_homed():
             self.afc.error.AFC_error("Please home printer before directly loading to toolhead", False)
             return False
 
@@ -707,13 +709,22 @@ class AFCLane:
                     if self.hub == 'direct_load' and self.prep_state:
                         self.logger.debug(f"Prep: direct load logic-{self.name}-{self.hub}")
                         self.afc.afcDeltaTime.set_start_time()
-                        self.afc.TOOL_LOAD(self)
+                        # Populate spool defaults (or assign the next Spoolman ID)
+                        # before loading so the lane metadata is ready once the
+                        # filament reaches the toolhead.
                         self.afc.spool._set_values(self)
+                        success = self.afc.TOOL_LOAD(self)
+                        if not success:
+                            # Loading failed, revert the lane metadata so it
+                            # reflects the actual hardware state.
+                            self.afc.spool.clear_values(self)
+                            self.status = AFCLaneState.NONE
+                            self.unit_obj.lane_unloaded(self)
                         self.logger.debug(f"Prep: direct load logic done-{self.name}-{self.hub}")
                         break
 
                     # Checking if loaded to hub(it should not be since filament was just inserted), if false load to hub. Does a fast load if hub distance is over 200mm
-                    if self.load_to_hub and not self.loaded_to_hub and self.load_state and self.prep_state and not self.is_direct_hub():
+                    if self.load_to_hub and not self.loaded_to_hub and self.load_state and self.prep_state and self.hub != 'direct_load':
                         self.move(self.dist_hub, self.dist_hub_move_speed, self.dist_hub_move_accel, self.dist_hub > 200)
                         self.loaded_to_hub = True
 
@@ -728,10 +739,21 @@ class AFCLane:
                         self._prep_capture_td1()
 
                 elif self.prep_state == True and self.load_state == True and not self.afc.function.is_printing():
-                    message = 'Cannot load {} load sensor is triggered.'.format(self.name)
-                    message += '\n    Make sure filament is not stuck in load sensor or check to make sure load sensor is not stuck triggered.'
-                    message += '\n    Once cleared try loading again'
-                    self.afc.error.AFC_error(message, pause=False)
+                    if getattr(self.unit_obj, "type", None) == "AMS":
+                        self.status = AFCLaneState.LOADED
+                        self.unit_obj.lane_loaded(self)
+                        self.afc.spool._set_values(self)
+                    else:
+                        message = 'Cannot load {} load sensor is triggered.'.format(self.name)
+                        message += '\n    Make sure filament is not stuck in load sensor or check to make sure load sensor is not stuck triggered.'
+                        message += '\n    Once cleared try loading again'
+                        self.afc.error.AFC_error(message, pause=False)
+                else:
+                    self.status = AFCLaneState.NONE
+                    self.loaded_to_hub = False
+                    self.td1_data = {}
+                    self.afc.spool.clear_values(self)
+                    self.unit_obj.lane_unloaded(self)
         self.prep_active = False
         self.afc.save_vars()
 
