@@ -3,6 +3,8 @@
 # Copyright (C) 2024 Armored Turtle
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
+from __future__ import annotations
+
 import traceback
 
 from configfile import error
@@ -143,7 +145,6 @@ class afcUnit:
 
         # Send out event so lanes can store units object
         self.printer.send_event("AFC_unit_{}:connect".format(self.name), self)
-        self.logger.info("AFC_unit_{}:connect".format(self.name))
 
         self.gcode.register_mux_command('UNIT_CALIBRATION', "UNIT", self.name, self.cmd_UNIT_CALIBRATION, desc=self.cmd_UNIT_CALIBRATION_help)
         self.gcode.register_mux_command('UNIT_LANE_CALIBRATION', "UNIT", self.name, self.cmd_UNIT_LANE_CALIBRATION, desc=self.cmd_UNIT_LANE_CALIBRATION_help)

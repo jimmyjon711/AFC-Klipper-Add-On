@@ -47,6 +47,7 @@ class AFCExtruder:
         self.logger     = self.afc.logger
         self.reactor: Union[PollReactor, SelectReactor] = self.printer.get_reactor()
         self.printer.register_event_handler("klippy:connect", self.handle_connect)
+        self.printer.register_event_handler("klippy:ready", self.handle_ready)
 
         self.extruder_move_timer= self.reactor.register_timer(self.extruder_move_cb)
         self.temp_check_timer   = self.reactor.register_timer(self.temp_check_cb)
@@ -74,10 +75,12 @@ class AFCExtruder:
         self.tc_lane: Optional[AFCLane] = None
         self.tool: str                  = config.get('tool', None)
         self.tool_ob                    = None
+        self.no_lanes                   = False
 
         self.lane_loaded: Optional[str] = None
         self.lanes: Dict                = {}
         self.load_active                = False
+        self.current_move_distance: int = 0
 
         self.tool_start_state = False
         if self.tool_start is not None:
@@ -151,6 +154,12 @@ class AFCExtruder:
             self.afc.lanes.pop(self.tc_lane.name)
             self.printer.objects.pop(f"AFC_lane {self.name}")
 
+    def handle_ready(self):
+        if( self.name in self.lanes ):
+            self.no_lanes = True
+            self.logger.info(f"{self.name} no lanes")
+
+
     def handle_connect(self):
         """
         Handle the connection event.
@@ -222,7 +231,7 @@ class AFCExtruder:
         """
         with self.mutex:
             if state != self.tool_start_state:
-                if self.tc_unit_name and self.name in self.lanes:
+                if self.tc_unit_name and self.no_lanes:
                     self.tc_lane.load_state = state
                     self.tc_lane.prep_state = state
                 
@@ -230,12 +239,9 @@ class AFCExtruder:
                         self.tc_lane._afc_prep_done):
                         if state:
                             if not self.load_active:
-                                self.logger.info(f"Loading {self.name}")
-                                self.load_active = True
-                                self.afc._check_extruder_temp(self.tc_lane, no_wait=True)
-                                self.reactor.update_timer(self.temp_check_timer,
-                                                        self.reactor.monotonic() +1 )
+                                self.load_unload_sequence(self.tool_stn)
                         else:
+                            self.tc_lane.set_tool_unloaded()
                             self.tc_lane.set_unloaded()
                         
                         self.afc.save_vars()
@@ -259,6 +265,8 @@ class AFCExtruder:
 
         :param eventtime: Event time from the button press
         """
+
+        # TODO: Need to figure out correct runout for toolheads without units attached (toolchanger setups)
         self._handle_toolhead_sensor_runout(self.fila_tool_end.runout_helper.filament_present, "tool_end")
         self.fila_tool_end.runout_helper.min_event_systime = self.reactor.monotonic() + self.fila_tool_end.runout_helper.event_delay
 
@@ -273,6 +281,20 @@ class AFCExtruder:
 
     def get_heater(self) -> Heater:
         return self.toolhead_extruder.get_heater()
+
+    def load_unload_sequence(self, distance: float):
+        self.logger.info(f"Loading {self.name}")
+        self.load_active = True
+        self.current_move_distance = distance
+        if distance > 0:
+            self.tc_lane.unit_obj.lane_loading(self.tc_lane)
+            self.tc_lane.status = AFCLaneState.TOOL_LOADING
+        else:
+            self.tc_lane.status = AFCLaneState.TOOL_UNLOADING
+
+        self.afc._check_extruder_temp(self.tc_lane, no_wait=True)
+        self.reactor.update_timer(self.temp_check_timer,
+                                self.reactor.monotonic() +1 )
 
     def move_extruder(self, distance, sync=False):
         if distance == 0:
@@ -320,6 +342,7 @@ class AFCExtruder:
 
         self.function.do_enable(False, self.name)
         self.load_active = False
+        self.current_move_distance = 0
         return self.reactor.NEVER
 
     def temp_check_cb(self, eventtime:float):
@@ -329,9 +352,14 @@ class AFCExtruder:
         if (current_temp >= target_temp - self.afc.temp_wait_tolerance 
             and current_temp <= target_temp + self.afc.temp_wait_tolerance):
             if self.tool_start_state:
-                self.logger.info(f"{self.name} temp within range, loading to nozzle")
-                self.move_extruder(self.tool_stn)
-                self.tc_lane.set_loaded()
+                info_str = "loading to" if self.current_move_distance > 0 else "unloading from"
+                self.logger.info(f"{self.name} temp within range, {info_str} nozzle")
+                self.move_extruder(self.current_move_distance)
+                if self.current_move_distance > 0:
+                    self.tc_lane.set_loaded()
+                    self.tc_lane.set_tool_loaded()
+                else:
+                    self.tc_lane.set_tool_unloaded()
             else:
                 self.load_active = False
                 self.tc_lane.set_unloaded()

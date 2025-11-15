@@ -989,13 +989,15 @@ class afc:
         cur_lane = self.lanes[lane]
         self.LANE_UNLOAD( cur_lane )
 
-    def LANE_UNLOAD(self, cur_lane):
+    def LANE_UNLOAD(self, cur_lane: AFCLane):
         cur_hub = cur_lane.hub_obj
 
         self.current_state = State.EJECTING_LANE
 
         # TODO: add a check for multi-tools to verify lane is not loaded to toolhead before trying to unload
-        if cur_lane.name != cur_lane.extruder_obj.lane_loaded and not cur_lane.is_direct_hub():
+        if (cur_lane.name != cur_lane.extruder_obj.lane_loaded and
+            not cur_lane.extruder_obj.no_lanes and
+            not cur_lane.is_direct_hub()):
             # Setting status as ejecting so if filament is removed and de-activates the prep sensor while
             # extruder motors are still running it does not trigger infinite spool or pause logic
             # once user removes filament lanes status will go to None
@@ -1019,6 +1021,9 @@ class afc:
             self.spool.set_spoolID(cur_lane, "")
             self.logger.info("LANE {} eject done".format(cur_lane.name))
             self.function.afc_led(cur_lane.led_not_ready, cur_lane.led_index)
+        elif cur_lane.extruder_obj.no_lanes and cur_lane.extruder_obj.lane_loaded:
+            cur_lane.status = AFCLaneState.EJECTING
+            cur_lane.extruder_obj.load_unload_sequence(cur_lane.extruder_obj.tool_stn_unload*-1)
 
         elif cur_lane.name == cur_lane.extruder_obj.lane_loaded:
             self.logger.info("LANE {} is loaded in toolhead, can't unload.".format(cur_lane.name))

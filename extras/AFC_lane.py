@@ -3,6 +3,7 @@
 # Copyright (C) 2024 Armored Turtle
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
+from __future__ import annotations
 
 import math
 import traceback
@@ -18,6 +19,7 @@ if TYPE_CHECKING:
     from extras.AFC_extruder import AFCExtruder
     from extras.AFC_hub import afc_hub
     from extras.AFC_buffer import AFCTrigger
+    from extras.AFC_unit import afcUnit
 
 try: from extras.AFC_utils import ERROR_STR, add_filament_switch
 except: raise error("Error when trying to import AFC_utils.ERROR_STR, add_filament_switch\n{trace}".format(trace=traceback.format_exc()))
@@ -69,7 +71,7 @@ class AFCLane:
         self.printer.register_event_handler("afc:moonraker_connect", self.handle_moonraker_connect)
         self.cb_update_weight   = self.reactor.register_timer( self.update_weight_callback )
 
-        self.unit_obj           = None
+        self.unit_obj: Optional[afcUnit]         = None
         self.hub_obj: Optional[afc_hub]          = None
         self.buffer_obj: Optional[AFCTrigger]    = None
         self.extruder_obj: Optional[AFCExtruder] = None
@@ -97,7 +99,7 @@ class AFCLane:
         unit                    = config.get('unit')                                    # Unit name(AFC_BoxTurtle/NightOwl/etc) that belongs to this stepper.
         # Overrides buffers set at the unit level
         self.hub                = config.get('hub',None)                                # Hub name(AFC_hub) that belongs to this stepper, overrides hub that is set in unit(AFC_BoxTurtle/NightOwl/etc) section.
-        self.logger.info(f"Hub name:{self.hub}")
+
         # Overrides buffers set at the unit and extruder level
         self.buffer_name        = config.get("buffer", None)                            # Buffer name(AFC_buffer) that belongs to this stepper, overrides buffer that is set in extruder(AFC_extruder) or unit(AFC_BoxTurtle/NightOwl/etc) sections.
         self.unit               = unit.split(':')[0]
@@ -281,15 +283,14 @@ class AFCLane:
             # Update boolean and check to make sure a TD-1 device is detected
             self.td1_when_loaded = self.td1_when_loaded and self.afc.td1_defined
 
-    def handle_unit_connect(self, unit_obj):
+    def handle_unit_connect(self, unit_obj:afcUnit):
         """
         Callback from <unit_name>:connect to verify units/hub/buffer/extruder object. Errors out if user specified names and they do not exist in their configuration
         """
-        self.logger.info(f"{self.fullname}")
         # Saving reference to unit
-        self.unit_obj = unit_obj
-        self.buffer_obj = self.unit_obj.buffer_obj
-        add_to_other_obj = False
+        self.unit_obj       = unit_obj
+        self.buffer_obj     = self.unit_obj.buffer_obj
+        add_to_other_obj    = False
 
         # Register all lanes if their type is not HTLF or only register lanes that are HTLF and have AFC_lane
         # in the name so that HTLF stepper names do not get added since they are not a lane for this unit type
