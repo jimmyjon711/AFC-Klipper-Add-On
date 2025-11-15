@@ -1225,7 +1225,7 @@ class afcAMS(afcUnit):
                 except Exception:
                     self.logger.exception("Failed to unset previously loaded lane")
             try:
-                lane.set_loaded()
+                lane.set_tool_loaded()
             except Exception:
                 self.logger.exception("Failed to mark lane %s as loaded", lane.name)
             try:
@@ -1296,7 +1296,7 @@ class afcAMS(afcUnit):
                     "Failed to unsync lane %s from extruder", lane.name
                 )
             try:
-                lane.set_unloaded()
+                lane.set_tool_unloaded()
             except Exception:
                 self.logger.exception("Failed to mark lane %s as unloaded", lane.name)
             try:

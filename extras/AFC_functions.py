@@ -45,6 +45,7 @@ class afcFunction:
         self.afc      = None
         self.logger   = None
         self.mcu      = None
+        self.next_cmd_time = 0.
 
         self.show_macros = True
         self.register_commands(self.show_macros, 'AFC_CALIBRATION', self.cmd_AFC_CALIBRATION,   self.cmd_AFC_CALIBRATION_help)
@@ -529,7 +530,7 @@ class afcFunction:
         cur_lane_loaded = self.get_current_lane_obj()
         if cur_lane_loaded is not None:
             cur_lane_loaded.unsync_to_extruder()
-            cur_lane_loaded.set_unloaded()
+            cur_lane_loaded.set_tool_unloaded()
             cur_lane_loaded.unit_obj.return_to_home()
             self.afc.function.handle_activate_extruder()
             self.logger.info("Manually removing {} loaded from toolhead".format(cur_lane_loaded.name))
@@ -599,6 +600,34 @@ class afcFunction:
             return last_extruder_position
         else:
             return past_extruder_position
+    
+    def sync_print_time(self):
+        """
+        Helper function to get current print time that compares to previous synced time
+        If last print time is greater than current print time, calls a toolhead dwell
+        If print time is greater than last, self.new_cmd_time gets updated
+        """
+        toolhead = self.printer.lookup_object('toolhead')
+        print_time = toolhead.get_last_move_time()
+        if self.next_cmd_time > print_time:
+            toolhead.dwell(self.next_cmd_time - print_time)
+        else:
+            self.next_cmd_time = print_time
+        
+    def do_enable(self, enable: bool, stepper_name: str):
+        """
+        Helper function to enable/disable stepper motor
+
+        :param enable: Enables/disables stepper motor
+        """
+        self.sync_print_time()
+        stepper_enable = self.printer.lookup_object('stepper_enable')
+        se = stepper_enable.lookup_enable(stepper_name)
+        if enable:
+            se.motor_enable(self.next_cmd_time)
+        else:
+            se.motor_disable(self.next_cmd_time)
+        self.sync_print_time()
 
     def check_for_td1_error(self, serial_number=None, print_error=True):
         '''

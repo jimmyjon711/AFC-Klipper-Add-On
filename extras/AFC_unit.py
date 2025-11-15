@@ -8,6 +8,11 @@ import traceback
 from configfile import error
 from datetime import datetime, timedelta
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from extras.AFC import afc
+
 try: from extras.AFC_utils import ERROR_STR
 except: raise error("Error when trying to import AFC_utils.ERROR_STR\n{trace}".format(trace=traceback.format_exc()))
 
@@ -20,10 +25,12 @@ class afcUnit:
         self.gcode          = self.printer.lookup_object('gcode')
         self.printer.register_event_handler("klippy:connect", self.handle_connect)
         self.printer.register_event_handler("afc:moonraker_connect", self.handle_moonraker_connect)
-        self.afc            = self.printer.lookup_object('AFC')
+        self.afc: afc       = self.printer.lookup_object('AFC')
         self.logger         = self.afc.logger
 
         self.lanes      = {}
+        self.logo       = '<span class=success--text>Ready\n</span>'
+        self.logo_error = '<span class=error--text>Not Ready</span>\n'
 
         # Objects
         self.buffer_obj     = None
@@ -136,6 +143,7 @@ class afcUnit:
 
         # Send out event so lanes can store units object
         self.printer.send_event("AFC_unit_{}:connect".format(self.name), self)
+        self.logger.info("AFC_unit_{}:connect".format(self.name))
 
         self.gcode.register_mux_command('UNIT_CALIBRATION', "UNIT", self.name, self.cmd_UNIT_CALIBRATION, desc=self.cmd_UNIT_CALIBRATION_help)
         self.gcode.register_mux_command('UNIT_LANE_CALIBRATION', "UNIT", self.name, self.cmd_UNIT_LANE_CALIBRATION, desc=self.cmd_UNIT_LANE_CALIBRATION_help)
@@ -157,7 +165,7 @@ class afcUnit:
         response["buffers"] = []
 
         for lane in self.lanes.values():
-            if lane.hub is not None and lane.hub not in response["hubs"]: response["hubs"].append(lane.hub)
+            if lane.hub is not None and not lane.is_direct_hub() and lane.hub not in response["hubs"]: response["hubs"].append(lane.hub)
             if lane.extruder_name is not None and lane.extruder_name not in response["extruders"]: response["extruders"].append(lane.extruder_name)
             if lane.buffer_name is not None and lane.buffer_name not in response["buffers"]: response["buffers"].append(lane.buffer_name)
 
