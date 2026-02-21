@@ -8,9 +8,7 @@ import json
 import re
 import traceback
 from configfile import error
-from typing import Any
-
-from typing import Dict, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from configfile import ConfigWrapper
@@ -53,17 +51,24 @@ class State:
     MOVING_LANE     = "Moving"
     RESTORING_POS   = "Restoring"
 
-def load_config(config):
+def load_config(config: ConfigWrapper) -> afc:
     return afc(config)
 
 class afc:
     def __init__(self, config: ConfigWrapper):
-        self.config  = config
-        self.printer = config.get_printer()
-        self.reactor = self.printer.get_reactor()
-        self.webhooks = self.printer.load_object(config, 'webhooks')
+        """
+        Initialise the AFC module, loading all configuration values, registering event handlers
+        and G-Code commands, and setting up the core AFC objects (spooler, error handler,
+        function helper, logger, and delta-time tracker).
+
+        :param config: Klipper ConfigWrapper for the [AFC] section.
+        """
+        self.config  : ConfigWrapper       = config
+        self.printer : Any                 = config.get_printer()
+        self.reactor : Any                 = self.printer.get_reactor()
+        self.webhooks: Any                 = self.printer.load_object(config, 'webhooks')
         self.printer.register_event_handler("klippy:connect",self.handle_connect)
-        self.logger  = AFC_logger(self.printer, self)
+        self.logger  : AFC_logger          = AFC_logger(self.printer, self)
 
         self.spool: AFCSpool = self.printer.load_object(config, 'AFC_spool')
         self.error: afcError = self.printer.load_object(config, 'AFC_error')
@@ -80,163 +85,163 @@ class afc:
         # Registering webhooks endpoint for <ip_address>/printer/afc/status
         self.webhooks.register_endpoint("afc/status", self._webhooks_status)
 
-        self.current_loading    = None
-        self.next_lane_load     = None
-        self.error_state        = False
-        self.current_state      = State.INIT
-        self.position_saved     = False
-        self.spoolman           = None
-        self.moonraker          = None
-        self.td1_defined        = False
-        self._td1_present       = False
-        self.lane_data_enabled  = False
-        self.prep_done          = False         # Variable used to hold of save_vars function from saving too early and overriding save before prep can be ran
-        self.in_print_timer     = None
-        self.activate_cb_done = True
-        self.db_backup          = False
+        self.current_loading    : Optional[str]         = None
+        self.next_lane_load     : Optional[str]         = None
+        self.error_state        : bool                  = False
+        self.current_state      : str                   = State.INIT
+        self.position_saved     : bool                  = False
+        self.spoolman           : Optional[Any]         = None
+        self.moonraker          : Optional[Any]         = None
+        self.td1_defined        : bool                  = False
+        self._td1_present       : bool                  = False
+        self.lane_data_enabled  : bool                  = False
+        self.prep_done          : bool                  = False         # Variable used to hold of save_vars function from saving too early and overriding save before prep can be ran
+        self.in_print_timer     : Optional[Any]         = None
+        self.activate_cb_done   : bool                  = True
+        self.db_backup          : bool                  = False
 
         # Objects for everything configured for AFC
-        self.units      = {}
-        self.tools: Dict[str, AFCExtruder] = {}
-        self.lanes: Dict[str, AFCLane]     = {}
-        self.hubs       = {}
-        self.buffers    = {}
-        self.tool_cmds  = {}
-        self.led_obj    = {}
-        self.led_state  = True
-        self.bypass     = None
-        self.bypass_last_state = False
-        self.message_queue = []
-        self.monitoring = False
-        self.number_of_toolchanges  = 0
-        self.current_toolchange     = 0
+        self.units      : Dict[str, Any]                = {}
+        self.tools      : Dict[str, AFCExtruder]        = {}
+        self.lanes      : Dict[str, AFCLane]            = {}
+        self.hubs       : Dict[str, Any]                = {}
+        self.buffers    : Dict[str, Any]                = {}
+        self.tool_cmds  : Dict[str, str]                = {}
+        self.led_obj    : Dict[str, Any]                = {}
+        self.led_state  : bool                          = True
+        self.bypass     : Optional[Any]                 = None
+        self.bypass_last_state : bool                   = False
+        self.message_queue : List[Tuple[str, str]]      = []
+        self.monitoring : bool                          = False
+        self.number_of_toolchanges  : int               = 0
+        self.current_toolchange     : int               = 0
 
         # tool position when tool change was requested
-        self.change_tool_pos = None
-        self.in_toolchange = False
-        self.tool_start = None
+        self.change_tool_pos : Optional[Any]            = None
+        self.in_toolchange   : bool                     = False
+        self.tool_start      : Optional[str]            = None
 
         # Save/resume pos variables
-        self.base_position = [0.0, 0.0, 0.0, 0.0]
-        self.last_gcode_position = [0.0, 0.0, 0.0, 0.0]
-        self.last_toolhead_position = [0.0, 0.0, 0.0, 0.0]
-        self.homing_position = [0.0, 0.0, 0.0, 0.0]
-        self.speed              = 25.
-        self.speed_factor       = 1./60.
-        self.absolute_coord     = True
-        self.absolute_extrude   = True
-        self.extrude_factor     = 1.
+        self.base_position          : List[float]       = [0.0, 0.0, 0.0, 0.0]
+        self.last_gcode_position    : List[float]       = [0.0, 0.0, 0.0, 0.0]
+        self.last_toolhead_position : List[float]       = [0.0, 0.0, 0.0, 0.0]
+        self.homing_position        : List[float]       = [0.0, 0.0, 0.0, 0.0]
+        self.speed                  : float             = 25.
+        self.speed_factor           : float             = 1./60.
+        self.absolute_coord         : bool              = True
+        self.absolute_extrude       : bool              = True
+        self.extrude_factor         : float             = 1.
 
         # Config get section
-        self.moonraker_port         = config.get("moonraker_port", 7125)             # Port to connect to when interacting with moonraker. Used when there are multiple moonraker/klipper instances on a single host
-        self.moonraker_host         = config.get("moonraker_host", "http://localhost")
-        self.moonraker_connect_to   = config.get("moonraker_timeout", 30)
-        self.unit_order_list        = config.get('unit_order_list','')
-        self.VarFile                = config.get('VarFile','../printer_data/config/AFC/AFC.var')# Path to the variables file for AFC configuration.
-        self.cfgloc                 = self._remove_after_last(self.VarFile,"/")
-        self.default_material_temps = config.getlists("default_material_temps",
+        self.moonraker_port         : int               = config.get("moonraker_port", 7125)             # Port to connect to when interacting with moonraker. Used when there are multiple moonraker/klipper instances on a single host
+        self.moonraker_host         : str               = config.get("moonraker_host", "http://localhost")
+        self.moonraker_connect_to   : int               = config.get("moonraker_timeout", 30)
+        self.unit_order_list        : str               = config.get('unit_order_list','')
+        self.VarFile                : str               = config.get('VarFile','../printer_data/config/AFC/AFC.var')# Path to the variables file for AFC configuration.
+        self.cfgloc                 : str               = self._remove_after_last(self.VarFile,"/")
+        self.default_material_temps : Optional[List[str]] = config.getlists("default_material_temps",
                                                       ("default: 235", "PLA:210", "PETG:235", "ABS:235", "ASA:235"))# Default temperature to set extruder when loading/unloading lanes. Material needs to be either manually set or uses material from spoolman if extruder temp is not set in spoolman.
         self.default_material_temps = list(self.default_material_temps) if self.default_material_temps is not None else None
-        self.default_material_type  = config.get("default_material_type", None)     # Default material type to assign to a spool once loaded into a lane
-        self.common_density_values  = config.getlists("common_density_values",
+        self.default_material_type  : Optional[str]    = config.get("default_material_type", None)     # Default material type to assign to a spool once loaded into a lane
+        self.common_density_values  : List[str]         = config.getlists("common_density_values",
                                                       ("PLA:1.24", "PETG:1.23", "ABS:1.04", "ASA:1.07"))
         self.common_density_values  = list(self.common_density_values)
-        self.test_extrude_amt       = config.get('test_extrude_amt', 10)
-        self.temp_wait_tolerance    = config.getfloat("temp_wait_tolerance", 5.0)         # Temperature tolerance in degrees Celsius for wait commands like M109
+        self.test_extrude_amt       : int               = config.get('test_extrude_amt', 10)
+        self.temp_wait_tolerance    : float             = config.getfloat("temp_wait_tolerance", 5.0)         # Temperature tolerance in degrees Celsius for wait commands like M109
 
-        self.disable_weight_check   = config.getboolean("disable_weight_check", False) # Set to True to disable weight check when loading filament into lane/toolhead
-        self.disable_ooze_check     = config.getboolean("disable_ooze_check", False) # Disable ooze check for lanes being on the same extruder in M104/M109 commands
+        self.disable_weight_check   : bool              = config.getboolean("disable_weight_check", False) # Set to True to disable weight check when loading filament into lane/toolhead
+        self.disable_ooze_check     : bool              = config.getboolean("disable_ooze_check", False) # Disable ooze check for lanes being on the same extruder in M104/M109 commands
         #LED SETTINGS
         # All variables use: (R,G,B,W) 0 = off, 1 = full brightness.
-        self.ind_lights = None
+        self.ind_lights             : Optional[Any]     = None
         # led_name is not used, either use or needs to be removed, removing this would break everyone's config as well
-        self.led_name               = config.get('led_name',None)
-        self.led_off                = "0,0,0,0"
-        self.led_fault              = config.get('led_fault','1,0,0,0')                # LED color to set when faults occur in lane
-        self.led_ready              = config.get('led_ready','0,0.8,0,0')                # LED color to set when lane is ready
-        self.led_not_ready          = config.get('led_not_ready','1,0,0,0')            # LED color to set when lane not ready
-        self.led_loading            = config.get('led_loading','1,1,1,0')              # LED color to set when lane is loading
-        self.led_prep_loaded        = config.get('led_loading','1,1,1,0')              # LED color to set when lane is loaded
-        self.led_unloading          = config.get('led_unloading','1,1,.5,0')           # LED color to set when lane is unloading
-        self.led_tool_loaded        = config.get('led_tool_loaded','0,0,1,0')          # LED color to set when lane is loaded into tool
-        self.led_tool_loaded_idle   = config.get('led_tool_loaded_idle','0.4,0.4,0,0') # LED color to set when lane is loaded into tool and idle
-        self.led_tool_unloaded      = config.get('led_tool_unloaded', '1,0,0,0')       # LED color to set when lanes extruder is unloaded
-        self.led_advancing          = config.get('led_buffer_advancing','0,0,1,0')     # LED color to set when buffer is advancing
-        self.led_trailing           = config.get('led_buffer_trailing','0,1,0,0')      # LED color to set when buffer is trailing
-        self.led_buffer_disabled    = config.get('led_buffer_disable', '0,0,0,0.25')   # LED color to set when buffer is disabled
-        self.led_spool_illum        = config.get('led_spool_illuminate', "1,1,1,1")    # LED color to illuminate under spool
+        self.led_name               : Optional[str]     = config.get('led_name',None)
+        self.led_off                : str               = "0,0,0,0"
+        self.led_fault              : str               = config.get('led_fault','1,0,0,0')                # LED color to set when faults occur in lane
+        self.led_ready              : str               = config.get('led_ready','0,0.8,0,0')                # LED color to set when lane is ready
+        self.led_not_ready          : str               = config.get('led_not_ready','1,0,0,0')            # LED color to set when lane not ready
+        self.led_loading            : str               = config.get('led_loading','1,1,1,0')              # LED color to set when lane is loading
+        self.led_prep_loaded        : str               = config.get('led_loading','1,1,1,0')              # LED color to set when lane is loaded
+        self.led_unloading          : str               = config.get('led_unloading','1,1,.5,0')           # LED color to set when lane is unloading
+        self.led_tool_loaded        : str               = config.get('led_tool_loaded','0,0,1,0')          # LED color to set when lane is loaded into tool
+        self.led_tool_loaded_idle   : str               = config.get('led_tool_loaded_idle','0.4,0.4,0,0') # LED color to set when lane is loaded into tool and idle
+        self.led_tool_unloaded      : str               = config.get('led_tool_unloaded', '1,0,0,0')       # LED color to set when lanes extruder is unloaded
+        self.led_advancing          : str               = config.get('led_buffer_advancing','0,0,1,0')     # LED color to set when buffer is advancing
+        self.led_trailing           : str               = config.get('led_buffer_trailing','0,1,0,0')      # LED color to set when buffer is trailing
+        self.led_buffer_disabled    : str               = config.get('led_buffer_disable', '0,0,0,0.25')   # LED color to set when buffer is disabled
+        self.led_spool_illum        : str               = config.get('led_spool_illuminate', "1,1,1,1")    # LED color to illuminate under spool
 
         # TOOL Cutting Settings
-        self.tool                   = ''
-        self.tool_cut               = config.getboolean("tool_cut", False)          # Set to True to enable toolhead cutting
-        self.tool_cut_threshold     = config.getint("tool_cut_threshold", 10000)
-        self.tool_cut_cmd           = config.get('tool_cut_cmd', None)              # Macro to use when doing toolhead cutting. Change macro name if you would like to use your own cutting macro
+        self.tool                   : str               = ''
+        self.tool_cut               : bool              = config.getboolean("tool_cut", False)          # Set to True to enable toolhead cutting
+        self.tool_cut_threshold     : int               = config.getint("tool_cut_threshold", 10000)
+        self.tool_cut_cmd           : Optional[str]     = config.get('tool_cut_cmd', None)              # Macro to use when doing toolhead cutting. Change macro name if you would like to use your own cutting macro
 
         # CHOICES
-        self.park                   = config.getboolean("park", False)              # Set to True to enable parking during unload
-        self.park_cmd               = config.get('park_cmd', None)                  # Macro to use when parking. Change macro name if you would like to use your own park macro
-        self.kick                   = config.getboolean("kick", False)              # Set to True to enable poop kicking after lane loads
-        self.kick_cmd               = config.get('kick_cmd', None)                  # Macro to use when kicking. Change macro name if you would like to use your own kick macro
-        self.wipe                   = config.getboolean("wipe", False)              # Set to True to enable nozzle wiping after lane loads
-        self.wipe_cmd               = config.get('wipe_cmd', None)                  # Macro to use when nozzle wiping. Change macro name if you would like to use your own wipe macro
-        self.poop                   = config.getboolean("poop", False)              # Set to True to enable pooping(purging color) after lane loads
-        self.poop_cmd               = config.get('poop_cmd', None)                  # Macro to use when pooping. Change macro name if you would like to use your own poop/purge macro
+        self.park                   : bool              = config.getboolean("park", False)              # Set to True to enable parking during unload
+        self.park_cmd               : Optional[str]     = config.get('park_cmd', None)                  # Macro to use when parking. Change macro name if you would like to use your own park macro
+        self.kick                   : bool              = config.getboolean("kick", False)              # Set to True to enable poop kicking after lane loads
+        self.kick_cmd               : Optional[str]     = config.get('kick_cmd', None)                  # Macro to use when kicking. Change macro name if you would like to use your own kick macro
+        self.wipe                   : bool              = config.getboolean("wipe", False)              # Set to True to enable nozzle wiping after lane loads
+        self.wipe_cmd               : Optional[str]     = config.get('wipe_cmd', None)                  # Macro to use when nozzle wiping. Change macro name if you would like to use your own wipe macro
+        self.poop                   : bool              = config.getboolean("poop", False)              # Set to True to enable pooping(purging color) after lane loads
+        self.poop_cmd               : Optional[str]     = config.get('poop_cmd', None)                  # Macro to use when pooping. Change macro name if you would like to use your own poop/purge macro
 
-        self.post_load_macro        = config.get("post_load_macro", None)
-        self.post_unload_macro      = config.get("post_unload_macro", None)
+        self.post_load_macro        : Optional[str]     = config.get("post_load_macro", None)
+        self.post_unload_macro      : Optional[str]     = config.get("post_unload_macro", None)
 
-        self.form_tip               = config.getboolean("form_tip", False)          # Set to True to tip forming when unloading lanes
-        self.form_tip_cmd           = config.get('form_tip_cmd', None)              # Macro to use when tip forming. Change macro name if you would like to use your own tip forming macro
+        self.form_tip               : bool              = config.getboolean("form_tip", False)          # Set to True to tip forming when unloading lanes
+        self.form_tip_cmd           : Optional[str]     = config.get('form_tip_cmd', None)              # Macro to use when tip forming. Change macro name if you would like to use your own tip forming macro
 
         # MOVE SETTINGS
-        self.quiet_mode             = False                                         # Flag indicating if quiet move is enabled or not
-        self.auto_home              = config.getboolean("auto_home", False)         # Flag indicating if homing needs to be done if printer is not already homed
-        self.auto_level_macro       = config.get("auto_level_macro", None)          # Set name for macro to run for auto bed leveling before tool change if auto_home is True and printer is not already homed
-        self.show_quiet_mode        = config.getboolean("show_quiet_mode", True)    # Flag indicating if quiet move is enabled or not
-        self.quiet_moves_speed      = config.getfloat("quiet_moves_speed", 50)      # Max speed in mm/s to move filament during quietmode
-        self.long_moves_speed       = config.getfloat("long_moves_speed", 100)      # Speed in mm/s to move filament when doing long moves
-        self.long_moves_accel       = config.getfloat("long_moves_accel", 400)      # Acceleration in mm/s squared when doing long moves
-        self.short_moves_speed      = config.getfloat("short_moves_speed", 25)      # Speed in mm/s to move filament when doing short moves
-        self.short_moves_accel      = config.getfloat("short_moves_accel", 400)     # Acceleration in mm/s squared when doing short moves
-        self.short_move_dis         = config.getfloat("short_move_dis", 10)         # Move distance in mm for failsafe moves.
-        self.tool_homing_distance   = config.getfloat("tool_homing_distance", 200)  # Distance over which toolhead homing is to be attempted.
-        self.max_move_dis           = config.getfloat("max_move_dis", 999999)       # Maximum distance to move filament. AFC breaks filament moves over this number into multiple moves. Useful to lower this number if running into timer too close errors when doing long filament moves.
-        self.n20_break_delay_time   = config.getfloat("n20_break_delay_time", 0.200)# Time to wait between breaking n20 motors(nSleep/FWD/RWD all 1) and then releasing the break to allow coasting.
+        self.quiet_mode             : bool              = False                                         # Flag indicating if quiet move is enabled or not
+        self.auto_home              : bool              = config.getboolean("auto_home", False)         # Flag indicating if homing needs to be done if printer is not already homed
+        self.auto_level_macro       : Optional[str]     = config.get("auto_level_macro", None)          # Set name for macro to run for auto bed leveling before tool change if auto_home is True and printer is not already homed
+        self.show_quiet_mode        : bool              = config.getboolean("show_quiet_mode", True)    # Flag indicating if quiet move is enabled or not
+        self.quiet_moves_speed      : float             = config.getfloat("quiet_moves_speed", 50)      # Max speed in mm/s to move filament during quietmode
+        self.long_moves_speed       : float             = config.getfloat("long_moves_speed", 100)      # Speed in mm/s to move filament when doing long moves
+        self.long_moves_accel       : float             = config.getfloat("long_moves_accel", 400)      # Acceleration in mm/s squared when doing long moves
+        self.short_moves_speed      : float             = config.getfloat("short_moves_speed", 25)      # Speed in mm/s to move filament when doing short moves
+        self.short_moves_accel      : float             = config.getfloat("short_moves_accel", 400)     # Acceleration in mm/s squared when doing short moves
+        self.short_move_dis         : float             = config.getfloat("short_move_dis", 10)         # Move distance in mm for failsafe moves.
+        self.tool_homing_distance   : float             = config.getfloat("tool_homing_distance", 200)  # Distance over which toolhead homing is to be attempted.
+        self.max_move_dis           : float             = config.getfloat("max_move_dis", 999999)       # Maximum distance to move filament. AFC breaks filament moves over this number into multiple moves. Useful to lower this number if running into timer too close errors when doing long filament moves.
+        self.n20_break_delay_time   : float             = config.getfloat("n20_break_delay_time", 0.200)# Time to wait between breaking n20 motors(nSleep/FWD/RWD all 1) and then releasing the break to allow coasting.
 
-        self.tool_max_unload_attempts= config.getint('tool_max_unload_attempts', 4) # Max number of attempts to unload filament from toolhead when using buffer as ramming sensor
-        self.tool_max_load_checks   = config.getint('tool_max_load_checks', 4)      # Max number of attempts to check to make sure filament is loaded into toolhead extruder when using buffer as ramming sensor
-        self.max_move_tries         = config.getint("max_move_tries", 20)
+        self.tool_max_unload_attempts: int              = config.getint('tool_max_unload_attempts', 4) # Max number of attempts to unload filament from toolhead when using buffer as ramming sensor
+        self.tool_max_load_checks   : int               = config.getint('tool_max_load_checks', 4)      # Max number of attempts to check to make sure filament is loaded into toolhead extruder when using buffer as ramming sensor
+        self.max_move_tries         : int               = config.getint("max_move_tries", 20)
 
-        self.rev_long_moves_speed_factor 	= config.getfloat("rev_long_moves_speed_factor", 1.)     # scalar speed factor when reversing filamentalist
+        self.rev_long_moves_speed_factor : float        = config.getfloat("rev_long_moves_speed_factor", 1.)     # scalar speed factor when reversing filamentalist
 
-        self.z_hop                  = config.getfloat("z_hop", 0)                   # Height to move up before and after a tool change completes
-        self.xy_resume              = config.getboolean("xy_resume", False)         # Need description or remove as this is currently an unused variable
-        self.resume_speed           = config.getfloat("resume_speed", self.speed)   # Speed mm/s of resume move. Set to 0 to use gcode speed
-        self.error_timeout          = config.getfloat("error_timeout", 36000)      # Timeout in seconds to pause before erroring out when AFC is in error state
-        self.resume_z_speed         = config.getfloat("resume_z_speed", self.speed) # Speed mm/s of resume move in Z. Set to 0 to use gcode speed
+        self.z_hop                  : float             = config.getfloat("z_hop", 0)                   # Height to move up before and after a tool change completes
+        self.xy_resume              : bool              = config.getboolean("xy_resume", False)         # Need description or remove as this is currently an unused variable
+        self.resume_speed           : float             = config.getfloat("resume_speed", self.speed)   # Speed mm/s of resume move. Set to 0 to use gcode speed
+        self.error_timeout          : float             = config.getfloat("error_timeout", 36000)      # Timeout in seconds to pause before erroring out when AFC is in error state
+        self.resume_z_speed         : float             = config.getfloat("resume_z_speed", self.speed) # Speed mm/s of resume move in Z. Set to 0 to use gcode speed
 
-        self.global_print_current   = config.getfloat("global_print_current", None) # Global variable to set steppers current to a specified current when printing. Going lower than 0.6 may result in TurtleNeck buffer's not working correctly
-        self.spool_ratio            = config.getfloat("spool_ratio",2)              # gear ratio for printed gearbox between N20 and spooler wheels
-        self.full_weight            = config.getfloat("full_weight",1000, minval=1) # full weight of filament spool (not counting spool itself)
-        self.enable_sensors_in_gui  = config.getboolean("enable_sensors_in_gui", False) # Set to True to show all sensor switches as filament sensors in mainsail/fluidd gui
-        self.load_to_hub            = config.getboolean("load_to_hub", True)        # Fast loads filament to hub when inserted, set to False to disable. This is a global setting and can be overridden at AFC_stepper
-        self.disable_homing_check   = config.getboolean("disable_homing_check", False)# Disables homing check when doing toolchanges. Only use this if you are using a toolchanger and don't need to home to unload toolheads
-        self.assisted_unload        = config.getboolean("assisted_unload", True)    # If True, the unload retract is assisted to prevent loose windings, especially on full spools. This can prevent loops from slipping off the spool
-        self.bypass_pause           = config.getboolean("pause_when_bypass_active", False) # When true AFC pauses print when change tool is called and bypass is loaded
-        self.unload_on_runout       = config.getboolean("unload_on_runout", False)  # When True AFC will unload lane and then pause when runout is triggered and spool to swap to is not set(infinite spool)
-        self.short_stats            = config.getboolean("print_short_stats", False) # Set to true to print AFC_STATS in short form instead of wide form, printing short form is better for smaller in width consoles
+        self.global_print_current   : Optional[float]  = config.getfloat("global_print_current", None) # Global variable to set steppers current to a specified current when printing. Going lower than 0.6 may result in TurtleNeck buffer's not working correctly
+        self.spool_ratio            : float             = config.getfloat("spool_ratio",2)              # gear ratio for printed gearbox between N20 and spooler wheels
+        self.full_weight            : float             = config.getfloat("full_weight",1000, minval=1) # full weight of filament spool (not counting spool itself)
+        self.enable_sensors_in_gui  : bool              = config.getboolean("enable_sensors_in_gui", False) # Set to True to show all sensor switches as filament sensors in mainsail/fluidd gui
+        self.load_to_hub            : bool              = config.getboolean("load_to_hub", True)        # Fast loads filament to hub when inserted, set to False to disable. This is a global setting and can be overridden at AFC_stepper
+        self.disable_homing_check   : bool              = config.getboolean("disable_homing_check", False)# Disables homing check when doing toolchanges. Only use this if you are using a toolchanger and don't need to home to unload toolheads
+        self.assisted_unload        : bool              = config.getboolean("assisted_unload", True)    # If True, the unload retract is assisted to prevent loose windings, especially on full spools. This can prevent loops from slipping off the spool
+        self.bypass_pause           : bool              = config.getboolean("pause_when_bypass_active", False) # When true AFC pauses print when change tool is called and bypass is loaded
+        self.unload_on_runout       : bool              = config.getboolean("unload_on_runout", False)  # When True AFC will unload lane and then pause when runout is triggered and spool to swap to is not set(infinite spool)
+        self.short_stats            : bool              = config.getboolean("print_short_stats", False) # Set to true to print AFC_STATS in short form instead of wide form, printing short form is better for smaller in width consoles
         # Setting to True enables espooler assist while printing
-        self.enable_assist          = config.getboolean("enable_assist",        True)
+        self.enable_assist          : bool              = config.getboolean("enable_assist",        True)
         # Weight spool has to be below to activate print assist
-        self.enable_assist_weight   = config.getfloat("enable_assist_weight",   500.0)
-        self.enable_hub_runout      = config.getboolean("enable_hub_runout",    True)
-        self.enable_tool_runout     = config.getboolean("enable_tool_runout",   True)
-        self.debounce_delay         = config.getfloat("debounce_delay",         0.)
+        self.enable_assist_weight   : float             = config.getfloat("enable_assist_weight",   500.0)
+        self.enable_hub_runout      : bool              = config.getboolean("enable_hub_runout",    True)
+        self.enable_tool_runout     : bool              = config.getboolean("enable_tool_runout",   True)
+        self.debounce_delay         : float             = config.getfloat("debounce_delay",         0.)
 
-        self.td1_when_loaded        = config.getboolean("capture_td1_when_loaded", False)
-        self.debug                  = config.getboolean('debug', False)             # Setting to True turns on more debugging to show on console
-        self.log_frame_data         = config.getboolean('log_frame_data', True)
-        self.testing                = config.getboolean('testing', False)           # Set to true for testing only so that failure states can be tested without stats being reset
+        self.td1_when_loaded        : bool              = config.getboolean("capture_td1_when_loaded", False)
+        self.debug                  : bool              = config.getboolean('debug', False)             # Setting to True turns on more debugging to show on console
+        self.log_frame_data         : bool              = config.getboolean('log_frame_data', True)
+        self.testing                : bool              = config.getboolean('testing', False)           # Set to true for testing only so that failure states can be tested without stats being reset
         # Get debug and cast to boolean
         self.logger.set_debug( self.debug )
         self._update_trsync(config)
@@ -248,17 +253,17 @@ class afc:
         # Printing here will not display in console, but it will go to klippy.log
         self.print_version()
 
-        self.BASE_UNLOAD_FILAMENT    = 'UNLOAD_FILAMENT'
-        self.RENAMED_UNLOAD_FILAMENT = '_AFC_RENAMED_{}_'.format(self.BASE_UNLOAD_FILAMENT)
-        self.BASE_M104               = 'M104'
-        self.RENAMED_M104            = '_AFC_RENAMED_{}_'.format(self.BASE_M104)
-        self.BASE_M109               = 'M109'
-        self.RENAMED_M109            = '_AFC_RENAMED_{}_'.format(self.BASE_M109)
+        self.BASE_UNLOAD_FILAMENT    : str               = 'UNLOAD_FILAMENT'
+        self.RENAMED_UNLOAD_FILAMENT : str              = '_AFC_RENAMED_{}_'.format(self.BASE_UNLOAD_FILAMENT)
+        self.BASE_M104               : str              = 'M104'
+        self.RENAMED_M104            : str              = '_AFC_RENAMED_{}_'.format(self.BASE_M104)
+        self.BASE_M109               : str              = 'M109'
+        self.RENAMED_M109            : str              = '_AFC_RENAMED_{}_'.format(self.BASE_M109)
 
-        self.afcDeltaTime = afcDeltaTime(self)
+        self.afcDeltaTime            : afcDeltaTime     = afcDeltaTime(self)
 
         # Register AFC macros
-        self.show_macros = config.getboolean('show_macros',
+        self.show_macros             : bool              = config.getboolean('show_macros',
                                              True)  # Show internal python AFC_ macros in the web interfaces (Mainsail/Fluidd)
 
         self.function.register_commands(self.show_macros, 'AFC_STATS', self.cmd_AFC_STATS, self.cmd_AFC_STATS_help,
@@ -279,17 +284,40 @@ class afc:
                                         self.cmd_AFC_RESET_STATS_help, self.cmd_AFC_RESET_STATS_options)
 
     @property
-    def current(self):
+    def current(self) -> Optional[str]:
+        """
+        Return the name of the lane currently loaded into the toolhead, or None if no lane
+        is loaded.
+        """
         return self.function.get_current_lane()
 
-    def _remove_after_last(self, string, char):
+    def _remove_after_last(self, string: str, char: str) -> str:
+        """
+        Truncate a string at and including the last occurrence of the given character,
+        returning everything up to and including that character. If the character is not
+        found the original string is returned unchanged.
+
+        :param string: The string to truncate.
+        :param char:   The delimiter character to search for (e.g. '/').
+        :return:       The truncated string, or the original string if char is not found.
+        """
         last_index = string.rfind(char)
         if last_index != -1:
             return string[:last_index + 1]
         else:
             return string
 
-    def _update_trsync(self, config):
+    def _update_trsync(self, config: ConfigWrapper) -> None:
+        """
+        Optionally patch Klipper's internal MCU trsync timeout constants to help prevent
+        Timer Too Close (TTC) errors on slower hardware. Only applies the patch if
+        ``trsync_update`` is set to True in the config, and only raises the values — it
+        will never lower them below Klipper's defaults. Skips constants that do not exist
+        (e.g. Kalico/Danger-Klipper builds).
+
+        :param config: Klipper ConfigWrapper used to read trsync_update, trsync_timeout,
+                       and trsync_single_timeout values.
+        """
         # Logic to update trsync values
         update_trsync = config.getboolean("trsync_update", False)                   # Set to true to enable updating trsync value in klipper mcu. Enabling this and updating the timeouts can help with Timer Too Close(TTC) errors
         if update_trsync:
@@ -308,11 +336,18 @@ class afc:
             except Exception as e:
                 self.logger.info("Unable to update TRSYNC_TIMEOUT: {}".format(e))
 
-    def register_config_callback(self, option):
+    def register_config_callback(self, option: Any) -> None:
+        """
+        No-op callback required by Klipper's virtual pin chip interface. Klipper calls this
+        when registering a chip so that it can receive config options; AFC's virtual pins do
+        not require any configuration, so this method intentionally does nothing.
+
+        :param option: Config option passed by Klipper (unused).
+        """
         # Function needed for virtual pins, does nothing
         return
 
-    def register_lane_macros(self, lane_obj):
+    def register_lane_macros(self, lane_obj: AFCLane) -> None:
         """
         Callback function to register macros with proper lane names so that klipper errors out correctly when users supply lanes that
         are not valid
@@ -324,7 +359,7 @@ class afc:
         self.gcode.register_mux_command('HUB_LOAD',     "LANE", lane_obj.name, self.cmd_HUB_LOAD,       desc=self.cmd_HUB_LOAD_help)
         self.gcode.register_mux_command('TOOL_LOAD',    "LANE", lane_obj.name, self.cmd_TOOL_LOAD,      desc=self.cmd_TOOL_LOAD_help)
 
-    def handle_moonraker_connect(self):
+    def handle_moonraker_connect(self) -> None:
         """
         Function that should be called at the beginning of PREP so that moonraker has
         enough time to start before AFC tries to connect. This fixes a race condition that can
@@ -356,7 +391,7 @@ class afc:
             self.logger.debug("Moonraker/Spoolman/afc_stats/td1 error\nError: {}\n{}".format(e, traceback.format_exc()))
             self.spoolman = None                      # set to none if not found
 
-    def handle_connect(self):
+    def handle_connect(self) -> None:
         """
         Handle the connection event.
         This function is called when the printer connects. It looks up the toolhead object
@@ -388,11 +423,16 @@ class afc:
 
         self.current_state = State.IDLE
 
-    def _rename_macros(self):
+    def _rename_macros(self) -> None:
+        """
+        Rename the stock M104 and M109 G-Code commands to AFC-prefixed versions so that
+        AFC can intercept temperature commands and apply its own ooze-prevention and
+        multi-extruder logic before optionally forwarding them to the original handlers.
+        """
         self.function._rename(self.BASE_M104, self.RENAMED_M104, self._cmd_AFC_M104, self._cmd_AFC_M104_help)
         self.function._rename(self.BASE_M109, self.RENAMED_M109, self._cmd_AFC_M109, self._cmd_AFC_M109_help)
 
-    def print_version(self, console_only=False):
+    def print_version(self, console_only: bool = False) -> None:
         """
         Calculated AFC git version and displays to console and log
         """
@@ -468,7 +508,12 @@ class afc:
         return error_str
 
     @property
-    def td1_present(self):
+    def td1_present(self) -> bool:
+        """
+        Return whether a TD1 filament-data device is currently present. When the printer
+        is ready and not mid-print, the value is refreshed live from Moonraker; otherwise
+        the last cached value is returned.
+        """
         present = self._td1_present
         if self.printer.state_message == 'Printer is ready' and self.moonraker is not None:
             if not self.function.is_printing(check_movement=True):
@@ -477,7 +522,7 @@ class afc:
 
         return present
 
-    def _reset_file_callback(self):
+    def _reset_file_callback(self) -> None:
         """
         Set timer to check back to see if printer is printing. This is needed as file and print status is set after
         this callback.
@@ -491,7 +536,7 @@ class afc:
         self.current_toolchange    = -1
         self.save_vars()
 
-    def in_print_reactor_timer(self, eventtime):
+    def in_print_reactor_timer(self, eventtime: float) -> float:
         """
         Print timer callback to check if printer is currently in a print. If printer is in a print,
         current filename is looked up and metadata is pulled from moonraker to get total filament change
@@ -517,7 +562,7 @@ class afc:
 
         return self.reactor.NEVER
 
-    def _get_default_material_temps(self, cur_lane):
+    def _get_default_material_temps(self, cur_lane: AFCLane) -> Tuple[float, bool]:
         """
         Helper function to get material temperatures
 
@@ -589,7 +634,7 @@ class afc:
 
         return wait
 
-    def _set_quiet_mode(self, val):
+    def _set_quiet_mode(self, val: bool) -> None:
         """
         Helper function to set quiet mode to on or off
 
@@ -601,7 +646,7 @@ class afc:
         else:
             self.quiet_mode = val
 
-    def _get_quiet_mode(self):
+    def _get_quiet_mode(self) -> bool:
         """
         Helper function to return if quiet is on or off
 
@@ -617,7 +662,7 @@ class afc:
         else:
             return self.quiet_mode
 
-    def _get_bypass_state(self):
+    def _get_bypass_state(self) -> bool:
         """
         Helper function to return if filament is present in bypass sensor
 
@@ -650,7 +695,7 @@ class afc:
 
         return bypass_state
 
-    def _check_bypass(self, unload=False):
+    def _check_bypass(self, unload: bool = False) -> bool:
         """
         Helper function that checks if bypass has filament loaded
 
@@ -679,7 +724,7 @@ class afc:
                                     "KICK": {"type": "int", "default": 0},
                                     "WIPE": {"type": "int", "default": 0},
                                     "FORM_TIP": {"type": "int", "default": 0}}
-    def cmd_AFC_TOGGLE_MACRO(self, gcmd):
+    def cmd_AFC_TOGGLE_MACRO(self, gcmd: GCodeCommand) -> None:
         """
         Enable/disable TOOL_CUT/PARK/POOP/KICK/WIPE/FORM_TIP macros.
 
@@ -707,7 +752,7 @@ class afc:
     cmd_AFC_QUIET_MODE_help = "Set quiet mode speed and enable/disable quiet mode"
     cmd_AFC_QUIET_MODE_options = {"SPEED": {"type": "float", "default": 50},
                                   "ENABLE": {"type": "int", "default": 0}}
-    def cmd_AFC_QUIET_MODE(self, gcmd):
+    def cmd_AFC_QUIET_MODE(self, gcmd: GCodeCommand) -> None:
         """
         Set lower speed on any filament moves.
 
@@ -728,7 +773,7 @@ class afc:
         self.logger.info("QuietMode {}, max speed of {} mm/sec".format(self._get_quiet_mode(), self.quiet_moves_speed))
 
     cmd_UNSET_LANE_LOADED_help = "Removes active lane loaded from toolhead loaded status"
-    def cmd_UNSET_LANE_LOADED(self, gcmd):
+    def cmd_UNSET_LANE_LOADED(self, gcmd: GCodeCommand) -> None:
         """
         Unsets the current lane from AFC loaded status.
 
@@ -748,7 +793,7 @@ class afc:
         self.function.unset_lane_loaded()
 
     cmd_SET_AFC_TOOLCHANGES_help = "Sets number of toolchanges for AFC to keep track of"
-    def cmd_SET_AFC_TOOLCHANGES(self, gcmd):
+    def cmd_SET_AFC_TOOLCHANGES(self, gcmd: GCodeCommand) -> None:
         """
         This macro can be used to set the total number of tool changes from the slicer. AFC will keep track of tool changes and print out
         the current tool change number when a T(n) command is called from G-code.
@@ -784,7 +829,7 @@ class afc:
 
     cmd_LANE_MOVE_help = "Lane Manual Movements"
     cmd_LANE_MOVE_options = {"LANE": {"type": "string", "default": "lane1"}, "DISTANCE": {"type": "int", "default": 20}}
-    def cmd_LANE_MOVE(self, gcmd):
+    def cmd_LANE_MOVE(self, gcmd: GCodeCommand) -> None:
         """
         This function handles the manual movement of a specified lane. It retrieves the lane
         specified by the 'LANE' parameter and moves it by the distance specified by the 'DISTANCE' parameter.
@@ -828,19 +873,19 @@ class afc:
         # Put CAM back to lane if it is loaded to the toolhead
         self.function.select_loaded_lane()
 
-    def _get_resume_speed(self):
+    def _get_resume_speed(self) -> float:
         """
         Common function for return resume speed
         """
         return self.resume_speed if self.resume_speed > 0 else self.speed
 
-    def _get_resume_speedz(self):
+    def _get_resume_speedz(self) -> float:
         """
         Common function for return resume z speed
         """
         return self.resume_z_speed if self.resume_z_speed > 0 else self.speed
 
-    def move_z_pos(self, z_amount, string="", wait_moves=False):
+    def move_z_pos(self, z_amount: float, string: str = "", wait_moves: bool = False) -> float:
         """
         Common function helper to move z, also does a check for max z so toolhead does not exceed max height
 
@@ -865,7 +910,7 @@ class afc:
 
         return newpos[2]
 
-    def move_e_pos( self, e_amount, speed, log_string="", wait_tool=False):
+    def move_e_pos(self, e_amount: float, speed: float, log_string: str = "", wait_tool: bool = False) -> None:
         """
         Common function helper to move extruder position
 
@@ -881,7 +926,7 @@ class afc:
 
         if wait_tool: self.toolhead.wait_moves()
 
-    def save_pos(self):
+    def save_pos(self) -> None:
         """
         Only save previous location on the first toolchange call to keep an error state from overwriting the location
         """
@@ -913,7 +958,7 @@ class afc:
             self.function.log_toolhead_pos("Not Saving In a toolchange, Error State: {}, Is Paused {}, Position_saved {}, in toolchange: {}, POS: ".format(
                 self.error_state, self.function.is_paused(), self.position_saved, self.in_toolchange ))
 
-    def restore_pos(self, move_z_first=True):
+    def restore_pos(self, move_z_first: bool = True) -> None:
         """
         restore_pos function restores the previous saved position, speed and coord type. The resume uses
         the z_hop value to lift, move to previous x,y coords, then lower to saved z position.
@@ -967,7 +1012,7 @@ class afc:
         self.current_state = State.IDLE
         self.position_saved = False
 
-    def save_vars(self):
+    def save_vars(self) -> None:
         """
         save_vars function saves lane variables to var file and prints with indents to
                   make it more readable for users
@@ -1007,7 +1052,7 @@ class afc:
 
     # HUB COMMANDS
     cmd_HUB_LOAD_help = "Load lane into hub"
-    def cmd_HUB_LOAD(self, gcmd):
+    def cmd_HUB_LOAD(self, gcmd: GCodeCommand) -> None:
         """
         This function handles the loading of a specified lane into the hub. It performs
         several checks and movements to ensure the lane is properly loaded.
@@ -1053,7 +1098,7 @@ class afc:
         self.function.select_loaded_lane()
 
     cmd_LANE_UNLOAD_help = "Unload lane from extruder"
-    def cmd_LANE_UNLOAD(self, gcmd):
+    def cmd_LANE_UNLOAD(self, gcmd: GCodeCommand) -> None:
         """
         This function handles the unloading of a specified lane from the extruder. It performs
         several checks and movements to ensure the lane is properly unloaded.
@@ -1080,7 +1125,17 @@ class afc:
         cur_lane = self.lanes[lane]
         self.LANE_UNLOAD( cur_lane )
 
-    def LANE_UNLOAD(self, cur_lane: AFCLane):
+    def LANE_UNLOAD(self, cur_lane: AFCLane) -> None:
+        """
+        Eject filament from the specified lane back to its retracted/home position. Handles
+        several scenarios: normal retraction behind the hub, direct-hub lanes that must be
+        tool-unloaded first, lanes that belong to an extruder with no physical hub (no_lanes),
+        and safety guards that prevent ejecting a lane currently loaded in the toolhead.
+        On successful ejection the spool ID is cleared, LEDs are updated, and variables are
+        saved to disk.
+
+        :param cur_lane: The lane object to eject.
+        """
         cur_hub = cur_lane.hub_obj
 
         self.current_state = State.EJECTING_LANE
@@ -1124,7 +1179,7 @@ class afc:
         self.current_state = State.IDLE
 
     cmd_TOOL_LOAD_help = "Load lane into tool"
-    def cmd_TOOL_LOAD(self, gcmd):
+    def cmd_TOOL_LOAD(self, gcmd: GCodeCommand) -> None:
         """
         This function handles the loading of a specified lane into the tool. It retrieves
         the lane specified by the 'LANE' parameter and calls the TOOL_LOAD method to perform
@@ -1156,7 +1211,7 @@ class afc:
 
         self.TOOL_LOAD(cur_lane, purge_length)
 
-    def TOOL_LOAD(self, cur_lane: AFCLane, purge_length: int=None, set_start_time=False):
+    def TOOL_LOAD(self, cur_lane: AFCLane, purge_length: Optional[str] = None, set_start_time: bool = False) -> bool:
         """
         This function handles the loading of a specified lane into the tool. It performs
         several checks and movements to ensure the lane is properly loaded.
@@ -1286,7 +1341,7 @@ class afc:
                     return False
         return True
 
-    def load_sequence(self, cur_lane: AFCLane, cur_hub: afc_hub, cur_extruder: AFCExtruder):
+    def load_sequence(self, cur_lane: AFCLane, cur_hub: afc_hub, cur_extruder: AFCExtruder) -> bool:
         """
         This function controls the loading sequence and allows for custom gcode commands to be executed
         during the loading process.
@@ -1420,7 +1475,7 @@ class afc:
         return True
 
     cmd_TOOL_UNLOAD_help = "Unload from tool head"
-    def cmd_TOOL_UNLOAD(self, gcmd):
+    def cmd_TOOL_UNLOAD(self, gcmd: GCodeCommand) -> None:
         """
         This function handles the unloading of a specified lane from the tool head. It retrieves
         the lane specified by the 'LANE' parameter or uses the currently loaded lane if no parameter
@@ -1454,7 +1509,7 @@ class afc:
         # User manually unloaded spool from toolhead, remove spool from active status
         self.spool.set_active_spool(None)
 
-    def TOOL_UNLOAD(self, cur_lane: AFCLane, set_start_time=True):
+    def TOOL_UNLOAD(self, cur_lane: AFCLane, set_start_time: bool = True) -> bool:
         """
         This function handles the unloading of a specified lane from the tool. It performs
         several checks and movements to ensure the lane is properly unloaded.
@@ -1556,7 +1611,7 @@ class afc:
         self.current_state = State.IDLE
         return True
 
-    def unload_sequence(self, cur_lane: AFCLane, cur_hub: afc_hub, cur_extruder: AFCExtruder):
+    def unload_sequence(self, cur_lane: AFCLane, cur_hub: afc_hub, cur_extruder: AFCExtruder) -> bool:
         """
         This function controls the unloading sequence and allows for custom gcode commands to be executed
         during the loading process.
@@ -1800,7 +1855,7 @@ class afc:
         return True
 
     cmd_CHANGE_TOOL_help = "change filaments in tool head"
-    def cmd_CHANGE_TOOL(self, gcmd):
+    def cmd_CHANGE_TOOL(self, gcmd: GCodeCommand) -> None:
         """
         This function handles the tool change process. It retrieves the lane specified by the 'LANE' parameter,
         checks the filament sensor, saves the current position, and performs the tool change by unloading the
@@ -1858,7 +1913,19 @@ class afc:
 
         self.CHANGE_TOOL(self.lanes[self.tool_cmds[Tcmd]], purge_length)
 
-    def CHANGE_TOOL(self, cur_lane: AFCLane, purge_length=None, restore_pos=True):
+    def CHANGE_TOOL(self, cur_lane: AFCLane, purge_length: Optional[str] = None, restore_pos: bool = True) -> None:
+        """
+        Perform a full tool change to the specified lane. If a different lane is currently
+        loaded it is unloaded first, then the new lane is loaded. Handles infinite-runout
+        scenarios by pre-heating the next extruder while the current one is still printing.
+        Saves and optionally restores the toolhead position around the change, tracks
+        toolchange progress counters, and records timing statistics.
+
+        :param cur_lane:     The target lane to load into the toolhead.
+        :param purge_length: Optional purge/poop length (mm) forwarded to the poop macro.
+        :param restore_pos:  If True, restore the toolhead to its pre-change position after
+                             a successful load.
+        """
         self.afcDeltaTime.set_start_time()
         # Check if the bypass filament sensor detects filament; if so, abort the tool change.
         if self._check_bypass(unload=False): return
@@ -1935,7 +2002,7 @@ class afc:
         self.function.log_toolhead_pos("Final Change Tool: Error State: {}, Is Paused {}, Position_saved {}, in toolchange: {}, POS: ".format(
                 self.error_state, self.function.is_paused(), self.position_saved, self.in_toolchange ))
 
-    def _get_message(self, clear=False):
+    def _get_message(self, clear: bool = False) -> Dict[str, str]:
         """
         Helper function to return a message from the error message queue
 
@@ -1951,7 +2018,7 @@ class afc:
             pass
         return message
 
-    def get_status(self, eventtime=None):
+    def get_status(self, eventtime: Optional[float] = None) -> Dict[str, Any]:
         """
         Displays current status of AFC for webhooks
         """
@@ -1986,7 +2053,7 @@ class afc:
         str["led_state"] = self.led_state
         return str
 
-    def _webhooks_status(self, web_request):
+    def _webhooks_status(self, web_request: Any) -> None:
         """
         Webhooks callback for <ip_address>/printer/afc/status, and displays current AFC status for everything
         """
@@ -2029,7 +2096,7 @@ class afc:
         web_request.send( {"status:" : {"AFC": str}})
 
     _cmd_AFC_M104_help = "Set extruder temperature"
-    def _cmd_AFC_M104(self, gcmd):
+    def _cmd_AFC_M104(self, gcmd: GCodeCommand) -> None:
         """
         This function sets the temperature of the specified extruder.
 
@@ -2040,7 +2107,7 @@ class afc:
         self._cmd_AFC_M109(gcmd, wait=False)
 
     _cmd_AFC_M109_help = "Set extruder temperature and wait for it to reach the target"
-    def _cmd_AFC_M109(self, gcmd, wait=True):
+    def _cmd_AFC_M109(self, gcmd: GCodeCommand, wait: bool = True) -> None:
         """
         This function sets the temperature of the specified extruder and waits for it to reach the target temperature.
         Supports T (tool), S (temp), and D (deadband).
@@ -2103,7 +2170,7 @@ class afc:
         pheaters.set_temperature(heater, temp, should_wait)
         self.logger.debug("Done setting temp")
 
-    def _heat_next_extruder(self, wait=True):
+    def _heat_next_extruder(self, wait: bool = True) -> Optional[Tuple[Any, float]]:
         """
         Heats the next extruder if it is not the current extruder.
         This function checks if the next lane to load is specified and if it is different from the current extruder.
@@ -2138,7 +2205,7 @@ class afc:
 
         return next_heater, set_temp
 
-    def _wait_for_temp_within_tolerance(self, heater, target_temp, tolerance=20):
+    def _wait_for_temp_within_tolerance(self, heater: Any, target_temp: float, tolerance: float = 20) -> None:
         """
         Waits until the heater's temperature is within the specified tolerance.
         """
@@ -2158,7 +2225,7 @@ class afc:
             eventtime = reactor.pause(eventtime + 1.0)
 
     cmd_TURN_OFF_AFC_LED_help = "Turns off all LEDs for AFC_led configurations"
-    def cmd_TURN_OFF_AFC_LED(self, gcmd: Any) -> None:
+    def cmd_TURN_OFF_AFC_LED(self, gcmd: GCodeCommand) -> None:
         """
         This macro handles turning off all LEDs for AFC_led configurations. Color for LEDs are saved if colors
         are changed while they are turned off.
@@ -2178,7 +2245,7 @@ class afc:
             led.turn_off_leds()
 
     cmd_TURN_ON_AFC_LED_help = "Turns on all LEDs for AFC_led configurations and restores state"
-    def cmd_TURN_ON_AFC_LED(self, gcmd):
+    def cmd_TURN_ON_AFC_LED(self, gcmd: GCodeCommand) -> None:
         """
         This macro handles turning on all LEDs for AFC_led configurations. LEDs are restored to last previous state.
 
@@ -2198,7 +2265,7 @@ class afc:
 
     cmd_AFC_STATS_help ="Prints AFC toolchange statistics to console"
     cmd_AFC_STATS_options = {"SHORT": {"type": "int", "default": 1}}
-    def cmd_AFC_STATS(self, gcmd):
+    def cmd_AFC_STATS(self, gcmd: GCodeCommand) -> None:
         """
         This macro handles printing toolchange statistics to console.
 
@@ -2251,7 +2318,7 @@ class afc:
     cmd_AFC_RESET_STATS_help ="Resets stats for a given extruder or lane"
     cmd_AFC_RESET_STATS_options = {"EXTRUDER": {"type": "string", "default":''},
                                    "LANE": {"type":"string", "default": ''}}
-    def cmd_AFC_RESET_STATS(self, gcmd: GCodeCommand):
+    def cmd_AFC_RESET_STATS(self, gcmd: GCodeCommand) -> None:
         """
         This macro handles resetting extruder(s) and lane(s) change total's. You can reset
         each extruder or lane one by one or use `all`. When using the command,
@@ -2321,7 +2388,7 @@ class afc:
             self.logger.info("A valid EXTRUDER or LANE needs to be specified to reset")
 
     cmd_AFC_CLEAR_MESSAGE_help = "Macro to clear error and warning message from AFC message queue"
-    def cmd_AFC_CLEAR_MESSAGE(self, gcmd):
+    def cmd_AFC_CLEAR_MESSAGE(self, gcmd: GCodeCommand) -> None:
         """
         This macro handles clearing one message at a time for messages that show up mainsail/klipperscreen/fluidd gui's.
 
@@ -2338,7 +2405,16 @@ class afc:
         self._get_message(clear=True)
 
     cmd__AFC_TEST_MESSAGES_help = "Macro to send test messages for testing"
-    def cmd__AFC_TEST_MESSAGES(self, gcmd):
+    def cmd__AFC_TEST_MESSAGES(self, gcmd: GCodeCommand) -> None:
+        """
+        Developer utility macro that fires three test error messages into the AFC message
+        queue. Used to verify that the message queue, GUI overlays, and AFC_CLEAR_MESSAGE
+        are all working correctly without needing to trigger a real fault.
+
+        Usage
+        -----
+        `_AFC_TEST_MESSAGES`
+        """
         self.logger.error("Test Message 1")
         self.logger.error("Test Message 2")
         self.logger.error("Test Message 3")
