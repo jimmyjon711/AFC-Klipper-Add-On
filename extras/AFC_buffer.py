@@ -1068,7 +1068,8 @@ class AFCFPSBuffer(AFCBuffer):
             self._correction_running = True
         if not has_stepper:
             half_db = self.deadband / 2.0
-            if self.smoothed_fps > self.set_point + half_db:
+            # elif self.smoothed_fps > self.set_point + half_db:
+            if self.smoothed_fps < self.set_point - half_db:
                 self.last_state = ADVANCING_STATE_NAME
                 self.advance_state = True
                 if self._latch_enabled:
@@ -1078,7 +1079,8 @@ class AFCFPSBuffer(AFCBuffer):
                 # Latched during load: keep advance_state True even if
                 # pressure drops briefly between motor pulses.
                 self.advance_state = True
-            elif self.smoothed_fps < self.set_point - half_db:
+            elif self.smoothed_fps > self.set_point + half_db:
+            # elif self.smoothed_fps < self.set_point - half_db:
                 self.last_state = TRAILING_STATE_NAME
                 self.advance_state = False
                 self.trailing_state = True
@@ -1158,9 +1160,11 @@ class AFCFPSBuffer(AFCBuffer):
 
         # Determine state for LED indication and fault reporting
         half_db = self.deadband / 2.0
-        if reading > self.set_point + half_db:
+        # if reading > self.set_point + half_db:
+        if reading < self.set_point - half_db:
             target_direction = ADVANCING_STATE_NAME
-        elif reading < self.set_point - half_db:
+        # elif reading < self.set_point - half_db:
+        elif reading > self.set_point + half_db:
             target_direction = TRAILING_STATE_NAME
         else:
             target_direction = NEUTRAL_STATE_NAME
