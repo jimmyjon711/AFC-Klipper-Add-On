@@ -324,6 +324,13 @@ class TestLaneRegistry:
         printer = MockPrinter(afc=MockAFC())
         return LaneRegistry(printer, logger=MockLogger())
 
+    def test_init_sets_printer_and_event_bus(self):
+        printer = MockPrinter(afc=MockAFC())
+        logger = MockLogger()
+        reg = LaneRegistry(printer, logger=logger)
+        assert reg.printer is printer
+        assert reg.event_bus is AMSEventBus.get_instance()
+
     def test_for_printer_returns_same_instance_for_same_printer(self):
         printer = MockPrinter(afc=MockAFC())
         r1 = LaneRegistry.for_printer(printer)
@@ -351,6 +358,16 @@ class TestLaneRegistry:
         assert reg._by_lane_name["lane1"] is info
         assert reg._by_lane_name_lower["lane1"] is info
         assert info in reg._by_extruder["extruder1"]
+
+    def test_unregister_lane_removes_all_lookup_entries(self):
+        reg = self._registry()
+        info = reg.register_lane("lane1", "ams1", 0, "extruder1")
+
+        reg._unregister_lane(info)
+
+        assert "lane1" not in reg._by_lane_name
+        assert "lane1" not in reg._by_lane_name_lower
+        assert "extruder1" not in reg._by_extruder
 
     def test_register_lane_replaces_existing_registration(self):
         reg = self._registry()
@@ -423,6 +440,24 @@ class TestAMSHardwareService:
     def _service(self):
         printer = MockPrinter(afc=MockAFC())
         return AMSHardwareService(printer, "ams1", logger=MockLogger()), printer
+
+    def test_init_default_state(self):
+        service, printer = self._service()
+        assert service._status_callbacks == []
+        assert service._polling_timer is None
+        assert service._polling_interval == 2.0
+        assert service._polling_interval_idle == 4.0
+        assert service._consecutive_idle_polls == 0
+        assert service._idle_poll_threshold == 3
+        assert service._last_encoder_clicks is None
+        assert service._last_f1s_hes == [None, None, None, None]
+        assert service._last_hub_hes == [None, None, None, None]
+        assert service._last_fps_value is None
+        assert service._polling_enabled is False
+        assert service._reactor is None
+        assert service._controller is None
+        assert service._status == {}
+        assert service._lane_snapshots == {}
 
     def test_for_printer_returns_cached_instance(self):
         printer = MockPrinter(afc=MockAFC())
@@ -500,7 +535,11 @@ class TestAMSHardwareService:
     def test_poll_status_uses_controller_get_status(self):
         service, printer = self._service()
         controller = MagicMock()
-        controller.get_status.return_value = {"fps_value": 0.5}
+        # Distinct values for the attach-time seed vs. the actual poll, so
+        # the assertion below can only pass if poll_status's own call to
+        # _update_status runs (attach_controller seeds its own value first).
+        controller.get_status.side_effect = [
+            {"fps_value": 0.1}, {"fps_value": 0.5}]
         service.attach_controller(controller)
         status = service.poll_status()
         assert status == {"fps_value": 0.5}
@@ -766,6 +805,8 @@ class TestAMSHardwareService:
         assert len(hub_events) == 4
         bay0 = next(e for e in f1s_events if e["bay"] == 0)
         assert bay0["value"] is True
+        assert service._last_f1s_hes == [True, False, False, False]
+        assert service._last_hub_hes == [False, True, False, False]
 
     def test_polling_callback_no_status_backs_off(self):
         service, printer = self._service()
@@ -977,6 +1018,13 @@ class TestSetFollowerIfChanged:
         fc._set_follower_if_changed("ams1", oams, 1, 1, "ctx")
         fc._set_follower_if_changed("ams1", oams, 0, 0, "ctx")
         assert oams.set_oams_follower.call_count == 2
+        assert any(
+            lvl == "debug"
+            and "Follower command for ams1: enable=0 direction=0" in m
+            for lvl, m in logger.messages)
+        assert (
+            "debug", "Follower disabled for ams1 (ctx)"
+        ) in logger.messages
 
     def test_forced_sends_even_when_unchanged(self):
         fc, reactor, logger = _make_follower_controller()
@@ -1017,9 +1065,16 @@ class TestLedErrorControl:
         fc.oams = {"ams1": oams}
 
         fc.set_led_error_if_changed(oams, "ams1", 0, 1, "ctx")
+        # Simulate the first MCU command completing so the *in-flight* queue
+        # guard can't be what's masking a duplicate send here -- only the
+        # _led_error_state dedup itself should prevent the second call.
+        fc._mcu_command_in_flight["ams1"] = False
         fc.set_led_error_if_changed(oams, "ams1", 0, 1, "ctx")  # duplicate, skipped
 
         oams.set_led_error.assert_called_once_with(0, 1)
+        assert (
+            "debug", "LED error set for ams1 spool 0 (ctx)"
+        ) in logger.messages
 
     def test_set_led_error_if_changed_sends_again_when_state_differs(self):
         fc, reactor, logger = _make_follower_controller()
@@ -1116,6 +1171,10 @@ class TestRateLimitedMcuCommandQueue:
 
         cmd.assert_not_called()
         assert "ams1" in fc._mcu_command_poll_timers
+        # Seeded when the queue is first created for this oams -- distinct
+        # from just reading it later via .get(name, False), which would
+        # look identical whether or not the key was ever actually set.
+        assert "ams1" in fc._mcu_command_in_flight
 
     def test_second_command_while_in_flight_is_queued_not_run(self):
         oams = MagicMock()
@@ -1168,6 +1227,7 @@ class TestRateLimitedMcuCommandQueue:
         cmd.assert_not_called()
 
         oams.action_status = None  # now idle
+        fc._mcu_command_in_flight["ams1"] = True  # seed so the reset below is proven
         result = captured["retry_cb"](0.0)
 
         cmd.assert_called_once()
@@ -1204,15 +1264,22 @@ class TestRateLimitedMcuCommandQueue:
         captured = {}
         reactor.register_timer = lambda cb, waketime=None: captured.setdefault("done_cb", cb)
         cmd = MagicMock()
+        cmd2 = MagicMock()
 
         fc.rate_limited_mcu_command("ams1", cmd)
         cmd.assert_called_once()
         assert fc._mcu_command_in_flight["ams1"] is True
+        fc.rate_limited_mcu_command("ams1", cmd2)  # queued behind cmd (still in-flight)
+        cmd2.assert_not_called()
 
         result = captured["done_cb"](0.0)
 
-        assert fc._mcu_command_in_flight["ams1"] is False
         assert result == reactor.NEVER
+        # Proves _done's call to _process_mcu_command_queue actually dequeued
+        # and ran the second command (rather than just resetting the flag) --
+        # in_flight ends up True again because cmd2 is now the one running.
+        cmd2.assert_called_once()
+        assert fc._mcu_command_in_flight["ams1"] is True
 
     def test_cleanup_unregister_failure_is_swallowed(self):
         oams = MagicMock()
@@ -1225,6 +1292,7 @@ class TestRateLimitedMcuCommandQueue:
         fc.cleanup()  # must not raise
 
         assert fc._mcu_command_poll_timers == {}
+        reactor.unregister_timer.assert_called_once()
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -1244,25 +1312,51 @@ class TestFPSState:
         st = FPSState()
         assert st.state == FPSLoadState.UNLOADED
         assert st.current_lane is None
+        assert st.current_oams is None
+        assert st.current_spool_idx is None
+        assert st.since is None
         assert st.toolhead_confirmed is False
+        assert st.last_encoder is None
         assert st.stuck_active is False
+        assert st.stuck_start_time is None
         assert st.clog_active is False
+        assert st.clog_start_time is None
+        assert st.clog_start_extruder is None
+        assert st.clog_start_encoder is None
         assert st.engagement_in_progress is False
+        assert st.engagement_checked_at is None
+        assert st.last_lane_change_time is None
 
     def test_reset_restores_defaults_after_mutation(self):
         st = FPSState()
         st.state = FPSLoadState.LOADED
         st.current_lane = "lane1"
+        st.current_oams = "ams1"
+        st.current_spool_idx = 2
+        st.since = 10.0
+        st.toolhead_confirmed = True
         st.stuck_active = True
+        st.stuck_start_time = 20.0
         st.clog_active = True
+        st.clog_start_time = 30.0
+        st.clog_start_extruder = 40.0
+        st.clog_start_encoder = 50
         st.engagement_in_progress = True
 
         st.reset()
 
         assert st.state == FPSLoadState.UNLOADED
         assert st.current_lane is None
+        assert st.current_oams is None
+        assert st.current_spool_idx is None
+        assert st.since is None
+        assert st.toolhead_confirmed is False
         assert st.stuck_active is False
+        assert st.stuck_start_time is None
         assert st.clog_active is False
+        assert st.clog_start_time is None
+        assert st.clog_start_extruder is None
+        assert st.clog_start_encoder is None
         assert st.engagement_in_progress is False
 
     def test_clear_encoder_samples(self):
@@ -1313,30 +1407,60 @@ class TestOAMSMonitorInit:
         assert monitor.stuck_pressure_low == 0.05
         assert monitor.stuck_load_grace == 3.0
 
+    def test_default_runtime_state_and_thresholds(self):
+        monitor, reactor, fps = _make_monitor(clog_sensitivity="medium")
+        assert monitor._timer is None
+        assert monitor._running is False
+        assert monitor._oams is None
+        assert monitor.stuck_pressure_clear == 0.12
+        assert monitor.stuck_dwell == 2.0
+        assert monitor.stuck_min_encoder == 3
+        assert monitor.clog_extrusion_window == 24.0
+        assert monitor.clog_post_load_grace == 12.0
+        # clog_dwell scales by the sensitivity multiplier (1.0 for "medium")
+        assert monitor.clog_dwell == 10.0
+
+    def test_clog_dwell_scales_with_clog_multiplier(self):
+        monitor, reactor, fps = _make_monitor(clog_sensitivity="high")
+        assert monitor.clog_dwell == 10.0 * monitor.clog_multiplier
+        assert monitor.clog_dwell != 10.0  # proves the multiplier was actually applied
+
 
 class TestOAMSMonitorLifecycle:
     def test_start_sets_running_and_oams(self):
         monitor, reactor, fps = _make_monitor()
+        reactor.register_timer = MagicMock(wraps=reactor.register_timer)
         oams = MagicMock()
         monitor.start(oams)
         assert monitor._running is True
         assert monitor._oams is oams
         assert monitor._timer is not None
+        reactor.register_timer.assert_called_once()
+        assert (
+            "debug", "Monitor started for FPS_buffer1"
+        ) in monitor.logger.messages
 
     def test_start_resets_detection_state(self):
         monitor, reactor, fps = _make_monitor()
         monitor.state.stuck_start_time = 5.0
         monitor.state.clog_start_time = 5.0
+        monitor.state.last_encoder = 42  # seed so clear_encoder_samples is proven
         monitor.start(MagicMock())
         assert monitor.state.stuck_start_time is None
         assert monitor.state.clog_start_time is None
+        assert monitor.state.last_encoder is None
 
     def test_stop_clears_running_and_timer(self):
         monitor, reactor, fps = _make_monitor()
         monitor.start(MagicMock())
+        reactor.unregister_timer = MagicMock()
         monitor.stop()
         assert monitor._running is False
         assert monitor._timer is None
+        reactor.unregister_timer.assert_called_once()
+        assert (
+            "debug", "Monitor stopped for FPS_buffer1"
+        ) in monitor.logger.messages
 
     def test_start_when_already_running_does_not_replace_timer(self):
         monitor, reactor, fps = _make_monitor()
@@ -1352,12 +1476,14 @@ class TestOAMSMonitorLifecycle:
 
     def test_notify_load_complete_sets_loaded_state(self):
         monitor, reactor, fps = _make_monitor()
+        monitor.state.last_encoder = 42  # seed so clear_encoder_samples is proven
         monitor.notify_load_complete("lane1", "ams1", 2)
         assert monitor.state.state == FPSLoadState.LOADED
         assert monitor.state.current_lane == "lane1"
         assert monitor.state.current_oams == "ams1"
         assert monitor.state.current_spool_idx == 2
         assert monitor.state.toolhead_confirmed is False
+        assert monitor.state.last_encoder is None
 
     def test_notify_unload_complete_resets_state(self):
         monitor, reactor, fps = _make_monitor()
@@ -1427,9 +1553,15 @@ class TestOAMSMonitorTick:
         monitor._oams = MagicMock()
         monitor.state.state = FPSLoadState.LOADED
         monitor.state.toolhead_confirmed = True  # was confirmed, now gone
+        monitor.state.current_lane = "lane1"  # seed so reset() below is proven
         result = monitor._monitor_tick(100.0)
         assert result == MockReactor.NEVER
         assert monitor._running is False
+        assert monitor.state.current_lane is None
+        assert monitor.state.state == FPSLoadState.UNLOADED
+        assert (
+            "debug", "FPS_buffer1: lane no longer loaded to toolhead, stopping monitor"
+        ) in monitor.logger.messages
 
     def test_not_printing_resets_clog_and_idles(self):
         monitor, reactor, fps = _make_monitor(is_printing_fn=lambda: False)
@@ -1543,6 +1675,9 @@ class TestCheckStuckSpool:
         monitor._check_stuck_spool(100.0, encoder_delta=0, pressure=0.05)
         assert monitor.state.stuck_start_time == 100.0
         assert monitor.state.stuck_active is False
+        assert any(
+            lvl == "debug" and "stuck spool timer started" in m
+            for lvl, m in monitor.logger.messages)
 
     def test_dwell_exceeded_fires_callback(self):
         monitor, reactor, fps = _make_monitor()
@@ -1551,6 +1686,11 @@ class TestCheckStuckSpool:
         monitor._check_stuck_spool(100.0, encoder_delta=0, pressure=0.05)
         assert monitor.state.stuck_active is True
         monitor._on_stuck_spool.assert_called_once()
+        assert any(
+            lvl == "info"
+            and "Stuck spool on FPS_buffer1: encoder stopped (0 clicks), "
+                "FPS pressure 0.05" in m
+            for lvl, m in monitor.logger.messages)
 
     def test_moving_encoder_does_not_trigger(self):
         monitor, reactor, fps = _make_monitor()
@@ -1650,6 +1790,11 @@ class TestCheckClog:
 
         assert monitor.state.clog_active is True
         monitor._on_clog.assert_called_once()
+        assert any(
+            lvl == "info" and m == (
+                "Clog detected on FPS_buffer1: extruder advanced 30.0mm, "
+                "encoder moved 2 clicks, FPS pressure 0.50 (dwell 20.0s)")
+            for lvl, m in monitor.logger.messages)
 
     def test_encoder_progress_restarts_window_instead_of_firing(self):
         monitor, reactor, fps = _make_monitor()
@@ -1821,6 +1966,27 @@ class TestAfcAMSInit:
         ams = self._build(config)
         assert ams.oams_name == "oams2"
 
+    def test_default_type_and_flags(self):
+        config, printer, afc = self._config()
+        ams = self._build(config)
+        assert ams.type == "OpenAMS"
+        assert ams.stepperless_drive is True
+        assert ams.auto_spoolman_create is False
+        # Note: afcAMS.__init__ re-fetches gcode via `self.printer.lookup_object
+        # ('gcode')` right after super().__init__(config) already set the same
+        # attribute via `self.printer.load_object(config, 'gcode')`. Both
+        # resolve to the identical object, so this line is fully redundant
+        # with the parent's own assignment -- there is no observable
+        # behavioral difference if it's removed, in this or any other test.
+        assert ams.gcode is printer._gcode
+
+    def test_custom_type_and_auto_spoolman_create(self):
+        config, printer, afc = self._config(
+            values={"type": "CustomAMS", "auto_spoolman_create": True})
+        ams = self._build(config)
+        assert ams.type == "CustomAMS"
+        assert ams.auto_spoolman_create is True
+
     def test_default_engagement_params(self):
         config, printer, afc = self._config()
         ams = self._build(config)
@@ -1883,6 +2049,15 @@ class TestAfcAMSInit:
         ams = self._build(config)  # must not raise
         assert ams is not None
 
+    def test_registers_temperature_oams_sensor_factory(self):
+        from extras.temperature_oams import TemperatureOAMS
+        config, printer, afc = self._config()
+        heaters = MagicMock()
+        printer._objects["heaters"] = heaters
+        self._build(config)
+        heaters.add_sensor_factory.assert_called_once_with(
+            "temperature_oams", TemperatureOAMS)
+
     def test_registers_mux_commands(self):
         config, printer, afc = self._config()
         gcode = MagicMock()
@@ -1893,6 +2068,9 @@ class TestAfcAMSInit:
         assert "AFC_OAMS_CALIBRATE_HUB_HES" in names
         assert "AFC_OAMS_CALIBRATE_HUB_HES_ALL" in names
         assert "AFC_OAMS_CLEAR_ERRORS" in names
+        gcode.register_command.assert_called_once_with(
+            "_AFC_OAMS_STUCK_RECOVERY", ams._cmd_stuck_spool_recovery,
+            desc="Internal: auto-recover from a stuck spool via unload+reload")
 
 
 # ── Small pure-logic helpers ──────────────────────────────────────────────
@@ -1928,6 +2106,9 @@ class TestVerifyEngagement:
 
         monitor.notify_engagement_start.assert_called_once()
         monitor.notify_engagement_end.assert_called_once()
+        assert any(
+            lvl == "info" and "Verifying engagement for lane1" in m
+            for lvl, m in ams.logger.messages)
 
     def test_no_monitor_is_safe(self):
         ams, afc, printer, reactor = _make_ams()
@@ -1979,6 +2160,9 @@ class TestVerifyEngagement:
         result = ams._verify_engagement(lane)
 
         assert result is True
+        assert any(
+            lvl == "info" and "Engagement verified: encoder moved 5 clicks" in m
+            for lvl, m in ams.logger.messages)
 
     def test_encoder_moved_enough_on_retry_returns_true(self):
         class _FakeOams:
@@ -2001,6 +2185,10 @@ class TestVerifyEngagement:
         result = ams._verify_engagement(lane)
 
         assert result is True
+        assert any(
+            lvl == "info"
+            and "Engagement verified on retry: encoder moved 3 clicks" in m
+            for lvl, m in ams.logger.messages)
 
     def test_no_encoder_movement_returns_false(self):
         oams = MagicMock()
@@ -2103,6 +2291,9 @@ class TestAdvanceToolStnToNozzle:
 
         ams._oams_extrude.assert_called_once_with(20.0, 25.0 * 60.0, "tool_stn_to_nozzle")
         afc.afcDeltaTime.log_with_time.assert_called_once()
+        assert any(
+            lvl == "info" and "advancing 20.0mm to nozzle" in m and "lane1" in m
+            for lvl, m in ams.logger.messages)
 
     def test_default_already_advanced_is_zero(self):
         ams, afc, printer, reactor = _make_ams()
@@ -2328,6 +2519,10 @@ class TestShouldBlockSensorForRunout:
             "lane1", _oams_runout_detected=True, tool_loaded=True,
             status=AFCLaneState.INFINITE_RUNOUT)
         assert ams._should_block_sensor_for_runout(lane, True) is True
+        assert any(
+            lvl == "debug"
+            and "Blocked sensor True for lane1" in m
+            for lvl, m in ams.logger.messages)
 
     def test_active_runout_allows_false_value_and_clears_flag(self):
         ams, afc, printer, reactor = _make_ams()
@@ -2383,8 +2578,11 @@ class TestWaitForIdle:
         def monotonic():
             return next(times, 40.0)
         reactor.monotonic = monotonic
+        reactor.pause = MagicMock()
 
         assert ams._wait_for_idle(timeout=30.0) is False
+        reactor.pause.assert_called_once()
+        assert ("error", "OAMS idle timeout") in ams.logger.messages
 
 
 class TestPrepCaptureTd1:
@@ -2560,6 +2758,12 @@ class TestHandleSameFpsReload:
         ams.lane_tool_loaded.assert_called_once_with(target)
         assert afc.current == "lane2"
         afc.save_vars.assert_called_once()
+        assert (
+            "info", "Same-FPS infinite runout: lane1 -> lane2"
+        ) in ams.logger.messages
+        assert (
+            "info", "Same-FPS reload complete: lane2 now active"
+        ) in ams.logger.messages
 
     def test_remaps_source_map_when_present(self):
         ams, afc, printer, reactor = _make_ams()
@@ -2574,6 +2778,9 @@ class TestHandleSameFpsReload:
 
         ams.gcode.run_script_from_command.assert_called_once_with(
             "SET_MAP LANE=lane2 MAP=T0")
+        assert (
+            "info", "Remapped T0 from lane1 to lane2"
+        ) in ams.logger.messages
 
     def test_no_source_map_skips_remap(self):
         ams, afc, printer, reactor = _make_ams()
@@ -2601,6 +2808,9 @@ class TestHandleSameFpsReload:
         afc.error.AFC_error.assert_called_once()
         assert afc.error.AFC_error.call_args[1]["pause"] is True
         target.set_tool_loaded.assert_not_called()
+        assert (
+            "error", "Same-FPS reload failed for lane2"
+        ) in ams.logger.messages
 
     def test_hardware_load_exception_pauses_and_returns_false(self):
         ams, afc, printer, reactor = _make_ams()
@@ -2614,6 +2824,9 @@ class TestHandleSameFpsReload:
         assert result is False
         msg = afc.error.AFC_error.call_args[0][0]
         assert "mcu fault" in msg
+        assert (
+            "error", "Same-FPS reload exception: mcu fault"
+        ) in ams.logger.messages
 
 
 class TestHandleRunout:
@@ -2655,6 +2868,9 @@ class TestHandleRunout:
         assert result is True
         assert lane._oams_runout_detected is True
         ams.handle_same_fps_reload.assert_called_once_with(lane, target)
+        assert (
+            "info", "OAMS same-FPS runout: lane1 -> lane2, seamless reload"
+        ) in ams.logger.messages
 
     def test_cross_extruder_defers_to_generic_infinite_runout(self):
         ams, afc, printer, reactor = _make_ams()
@@ -2667,6 +2883,9 @@ class TestHandleRunout:
 
         assert result is False
         assert lane._oams_runout_empty is True
+        assert any(
+            lvl == "info" and "OAMS cross-extruder runout: lane1 -> lane2" in m
+            for lvl, m in ams.logger.messages)
 
 
 # ── Simple unit-interface overrides ───────────────────────────────────────
@@ -2715,8 +2934,10 @@ class TestSimpleOverrides:
         oams = MagicMock()
         oams.action_status = None
         ams, afc, printer, reactor = _make_ams(oams=oams)
+        ams._wait_for_idle = MagicMock(return_value=True)
         assert ams.lane_unload(_make_lane("lane1")) is True
         oams.unload_spool_with_retry.assert_called_once()
+        assert ams._wait_for_idle.call_count == 2
 
     def test_lane_unload_exception_logged_still_returns_true(self):
         oams = MagicMock()
@@ -2755,6 +2976,9 @@ class TestCalibrateLane:
         success, msg, dist = ams.calibrate_lane(lane, 0.1)
         assert success is True
         assert msg == "calibration_lane"
+        assert (
+            "info", "Running HUB HES calibration for lane1"
+        ) in ams.logger.messages
 
     def test_hardware_calibration_failure_returns_false(self):
         oams = MagicMock()
@@ -2791,6 +3015,9 @@ class TestCalibrateBowden:
         assert success is True
         afc.gcode.run_script_from_command.assert_called_once_with(
             "OAMS_CALIBRATE_PTFE_LENGTH OAMS=1 SPOOL=2")
+        assert (
+            "info", "Running PTFE calibration for lane1"
+        ) in ams.logger.messages
 
     def test_gcode_exception_returns_false(self):
         oams = MagicMock()
@@ -2831,11 +3058,19 @@ class TestUnitUnloadLane:
         afc.post_unload_macro = None
         afc.move_e_pos = MagicMock()
         afc.do_tool_cut_tip_form = MagicMock()
+        extruder = MagicMock()
+        extruder.tool_unload_speed = 25.0
         lane = _make_lane("lane1")
-        result = ams.unit_unload_lane(lane, MagicMock())
+        result = ams.unit_unload_lane(lane, extruder)
         assert result is True
         afc.save_vars.assert_called_once()
         assert lane.status == AFCLaneState.NONE
+        afc.move_e_pos.assert_called_once_with(-2, 25.0, "Quick Pull", wait_tool=False)
+        lane.disable_buffer.assert_called_once()
+        lane.sync_to_extruder.assert_called_once()
+        lane.select_lane.assert_called_once()
+        afc.do_tool_cut_tip_form.assert_called_once_with(lane, extruder)
+        lane.set_tool_unloaded.assert_called_once_with(normal_toolchange=True)
 
     def test_failure_returns_false_without_saving(self):
         ams, afc, printer, reactor = _make_ams()
@@ -2880,9 +3115,11 @@ class TestLaneUnloadingAndPrepareUnload:
         ams, afc, printer, reactor = _make_ams()
         ams.prepare_unload = MagicMock()
         lane = _make_lane("lane1")
-        with patch.object(afcUnit, "lane_unloading", MagicMock()):
+        super_mock = MagicMock()
+        with patch.object(afcUnit, "lane_unloading", super_mock):
             ams.lane_unloading(lane)
         ams.prepare_unload.assert_called_once()
+        super_mock.assert_called_once_with(lane)
 
     def test_lane_unloading_prepare_unload_exception_logged(self):
         ams, afc, printer, reactor = _make_ams()
@@ -3265,6 +3502,7 @@ class TestPollOamsSensors:
         ams._poll_oams_sensors(100.0)
 
         lane.handle_load_runout.assert_called_once_with(100.0, False)
+        assert ams._last_f1s[0] is False
 
     def test_f1s_change_blocked_by_runout_guard_skips_handle(self):
         oams = MagicMock()
@@ -3279,6 +3517,7 @@ class TestPollOamsSensors:
         ams._poll_oams_sensors(100.0)
 
         lane.handle_load_runout.assert_not_called()
+        assert ams._last_f1s[0] is False
 
     def test_f1s_lost_clears_loaded_to_hub(self):
         oams = MagicMock()
@@ -3306,6 +3545,7 @@ class TestPollOamsSensors:
 
         lane.handle_load_runout.assert_not_called()
         assert ams._last_f1s[0] is True
+        assert ams._prev_states_stale is False
 
     def test_suppressed_lane_clears_suppression_flag(self):
         oams = MagicMock()
@@ -3528,6 +3768,9 @@ class TestOnStuckSpoolRecoveryNeeded:
         ams._on_stuck_spool_recovery_needed("fps1", "lane1")
         ams.gcode.run_script_from_command.assert_called_once_with(
             "_AFC_OAMS_STUCK_RECOVERY LANE=lane1 FPS=fps1")
+        assert (
+            "info", "Stuck spool recovery scheduled: fps=fps1, lane=lane1"
+        ) in ams.logger.messages
 
     def test_none_fps_name_uses_empty_string(self):
         ams, afc, printer, reactor = _make_ams()
@@ -3563,6 +3806,9 @@ class TestStuckSpoolRecoveryFallback:
         args, kwargs = afc.error.AFC_error.call_args
         assert "some reason" in args[0]
         assert kwargs["pause"] is True
+        assert any(
+            lvl == "error" and "Stuck spool auto-recovery failed for lane1" in m
+            for lvl, m in ams.logger.messages)
 
     def test_afc_error_failure_falls_back_to_gcode_pause(self):
         ams, afc, printer, reactor = _make_ams()
@@ -3570,6 +3816,10 @@ class TestStuckSpoolRecoveryFallback:
         ams.gcode = MagicMock()
         ams._stuck_spool_recovery_fallback("fps1", "lane1", "reason")
         ams.gcode.run_script_from_command.assert_called_once_with("PAUSE")
+        assert (
+            "error",
+            "Failed to raise AFC error for stuck fallback: no error handler",
+        ) in ams.logger.messages
 
     def test_gcode_pause_failure_is_swallowed(self):
         ams, afc, printer, reactor = _make_ams()
@@ -3663,6 +3913,9 @@ class TestCmdStuckSpoolRecovery:
         ams._cmd_stuck_spool_recovery(self._gcmd())
         ams._stuck_spool_recovery_fallback.assert_called_once_with(
             "fps1", "lane1", "lane not found")
+        assert (
+            "error", "Stuck spool recovery: lane 'lane1' not found, pausing"
+        ) in ams.logger.messages
 
     def test_none_lane_name_falls_back(self):
         ams, afc, printer, reactor = _make_ams()
@@ -3687,6 +3940,23 @@ class TestCmdStuckSpoolRecovery:
         afc.TOOL_LOAD.assert_called_once_with(lane, set_start_time=True)
         ams._stuck_spool_recovery_clear_oams_state.assert_called_once()
         ams.gcode.run_script_from_command.assert_any_call("AFC_RESUME")
+        afc.save_pos.assert_called_once()
+        afc.move_z_pos.assert_called_once_with(5.5, "stuck_spool_recovery_zhop")
+        afc.error.reset_failure.assert_called_once()
+        assert (
+            "info",
+            "Stuck spool auto-recovery starting: unload then reload for lane1",
+        ) in ams.logger.messages
+        assert (
+            "info", "Stuck spool recovery: unloading lane1"
+        ) in ams.logger.messages
+        assert (
+            "info", "Stuck spool recovery: reloading lane1"
+        ) in ams.logger.messages
+        assert (
+            "info",
+            "Stuck spool auto-recovery SUCCEEDED for lane1, resuming print",
+        ) in ams.logger.messages
 
     def test_already_paused_skips_pause_resume_send(self):
         ams, afc, printer, reactor = _make_ams()
@@ -3782,13 +4052,17 @@ class TestCmdStuckSpoolRecovery:
         ams._stuck_spool_recovery_clear_oams_state = MagicMock()
         ams.gcode = MagicMock()
 
+        pause_calls = {"n": 0}
+
         def pause(t):
+            pause_calls["n"] += 1
             hub.state = False  # clears on the first poll
         reactor.pause = pause
 
         ams._cmd_stuck_spool_recovery(self._gcmd())
 
         afc.TOOL_LOAD.assert_called_once()
+        assert pause_calls["n"] == 1
 
     def test_hub_never_clears_logs_warning_but_proceeds(self):
         ams, afc, printer, reactor = _make_ams()
@@ -3841,6 +4115,9 @@ class TestCmdStuckSpoolRecovery:
 
         ams._stuck_spool_recovery_fallback.assert_called_once()
         assert "mcu fault" in ams._stuck_spool_recovery_fallback.call_args[0][2]
+        assert (
+            "error", "Stuck spool auto-recovery FAILED for lane1: mcu fault"
+        ) in ams.logger.messages
 
     def test_afc_resume_failure_is_logged(self):
         ams, afc, printer, reactor = _make_ams()
@@ -4017,11 +4294,13 @@ class TestCmdClearErrors:
     def test_clears_hardware_errors(self):
         oams = MagicMock()
         ams, afc, printer, reactor = _make_ams(oams=oams)
+        afc.reactor.pause = MagicMock()
         gcmd = _make_gcmd()
         ams.cmd_AFC_OAMS_CLEAR_ERRORS(gcmd)
         oams.abort_current_action.assert_called_once()
         oams.clear_errors.assert_called_once()
         assert oams.current_spool is None
+        afc.reactor.pause.assert_called_once()
 
     def test_hardware_clear_failure_logged(self):
         oams = MagicMock()
@@ -4475,6 +4754,10 @@ class TestUnloadAfterTd1:
 
         assert oams.unload_spool.call_count == 1
         oams.clear_errors.assert_called_once()
+        ams._wait_for_idle.assert_called_once()
+        assert (
+            "info", "TD-1 unload completed for lane1"
+        ) in ams.logger.messages
 
     def test_retries_up_to_three_times_then_gives_up(self):
         ams, afc, printer, reactor = _make_ams()
@@ -4546,6 +4829,7 @@ class TestCancelAndCleanupTd1:
         oams.unload_spool.assert_called_once()
         oams.clear_errors.assert_called_once()
         ams._clear_lane_state_after_td1.assert_called_once_with(lane)
+        ams._wait_for_idle.assert_called_once()
 
     def test_each_step_failure_is_independently_swallowed(self):
         ams, afc, printer, reactor = _make_ams()
@@ -4695,6 +4979,11 @@ class TestOamsLoad:
 
         assert result is True
         oams.load_spool_with_retry.assert_called_once()
+        # Called once at the very top and once before the load attempt.
+        assert ams._wait_for_idle.call_count == 2
+        assert any(
+            lvl == "debug" and "Could not query OAMS current spool: mcu busy" in m
+            for lvl, m in ams.logger.messages)
 
     def test_already_loaded_short_circuit_success(self):
         oams = MagicMock()
@@ -4717,6 +5006,10 @@ class TestOamsLoad:
         monitor.start.assert_called_once_with(oams)
         assert lane.loaded_to_hub is True
         oams.load_spool_with_retry.assert_not_called()
+        assert any(
+            lvl == "info"
+            and m.startswith("OAMS spool 0 already loaded to the toolhead")
+            for lvl, m in ams.logger.messages)
 
     def test_already_loaded_short_circuit_without_follower_or_monitor(self):
         oams = MagicMock()
@@ -4748,6 +5041,10 @@ class TestOamsLoad:
 
         assert result is True
         oams.load_spool_with_retry.assert_called_once()
+        assert any(
+            lvl == "info"
+            and "toolhead sensor does not see filament for lane1" in m
+            for lvl, m in ams.logger.messages)
 
     def test_toolhead_sensor_check_exception_runs_real_load(self):
         oams = MagicMock()
@@ -4819,6 +5116,7 @@ class TestOamsLoad:
         ams._verify_engagement = MagicMock(return_value=True)
         ams._advance_tool_stn_to_nozzle = MagicMock()
         ams._wait_for_idle = MagicMock(return_value=True)
+        afc.reactor.pause = MagicMock()
         lane = self._lane()
 
         ams._oams_load(lane)
@@ -4828,6 +5126,8 @@ class TestOamsLoad:
         assert calls[0][0][2] == 0
         follower.enable_follower.assert_any_call(
             ams._get_monitor_state(), oams, 1, "before load", force=True)
+        # One pause after the stop, one after the enable-forward.
+        assert afc.reactor.pause.call_count == 2
 
     def test_load_spool_with_retry_failure_retries(self):
         oams = MagicMock()
@@ -4910,10 +5210,13 @@ class TestOamsLoad:
         oams.determine_current_spool.return_value = None
         oams.load_spool_with_retry.return_value = (True, "ok")
         ams, afc, printer, reactor = _make_ams(oams=oams)
+        follower = MagicMock()
+        ams._follower = follower
         ams._verify_engagement = MagicMock(return_value=False)
         ams._advance_tool_stn_to_nozzle = MagicMock()
         ams._wait_for_idle = MagicMock(return_value=True)
         ams._oams_extrude = MagicMock()
+        afc.reactor.pause = MagicMock()
         lane = self._lane()
         lane.extruder_obj.tool_stn_unload = 15.0
 
@@ -4926,6 +5229,19 @@ class TestOamsLoad:
         oams.abort_current_action.assert_called_once_with(wait=True)
         oams.unload_spool_with_retry.assert_called_once()
         oams.clear_errors.assert_called_once()
+        assert any(
+            lvl == "info" and "Engagement failed attempt 1, cleaning up" in m
+            for lvl, m in ams.logger.messages)
+        # Follower is stopped 3x: before the load attempt starts, during
+        # engagement cleanup, and again before hardware cleanup.
+        cleanup_calls = follower.set_follower_state.call_args_list
+        assert len(cleanup_calls) == 3
+        assert all(c[0][2] == 0 for c in cleanup_calls)
+        # wait_for_idle: start, before-attempt, then 4x during cleanup.
+        assert ams._wait_for_idle.call_count == 6
+        # "stop before load" + "before load" enable + "stop before cleanup"
+        # (no retry-reenable pause since max_retries=1 means no next attempt).
+        assert afc.reactor.pause.call_count == 3
 
     def test_engagement_failure_no_retract_when_tool_stn_unload_zero(self):
         oams = MagicMock()
@@ -4968,6 +5284,7 @@ class TestOamsLoad:
         ams._verify_engagement = MagicMock(side_effect=[False, True])
         ams._advance_tool_stn_to_nozzle = MagicMock()
         ams._wait_for_idle = MagicMock(return_value=True)
+        afc.reactor.pause = MagicMock()
         lane = self._lane()
 
         result = ams._oams_load(lane, max_retries=2)
@@ -4975,6 +5292,9 @@ class TestOamsLoad:
         assert result is True
         follower.enable_follower.assert_any_call(
             ams._get_monitor_state(), oams, 1, "before retry", force=True)
+        # "stop before load" + "before load" enable (pre-loop) + "stop
+        # before cleanup" + retry-delay + post-re-enable (attempt-1 cleanup).
+        assert afc.reactor.pause.call_count == 5
 
     def test_retries_without_follower_between_attempts(self):
         oams = MagicMock()
@@ -5076,6 +5396,7 @@ class TestOamsUnload:
 
         monitor.stop.assert_called_once()
         monitor.notify_unload_complete.assert_called_once()
+        assert ams._wait_for_idle.call_count == 2
 
     def test_no_monitor_is_safe(self):
         oams = self._ready_oams()
@@ -5093,6 +5414,7 @@ class TestOamsUnload:
         ams._wait_for_hub_settle = MagicMock(return_value=True)
         follower = MagicMock()
         ams._follower = follower
+        afc.reactor.pause = MagicMock()
 
         ams._oams_unload(self._lane())
 
@@ -5102,6 +5424,8 @@ class TestOamsUnload:
         follower.set_follower_state.assert_any_call(
             ams._get_monitor_state(), oams, 0, 0,
             "stop after unload", force=True)
+        # One pause after the reverse-enable, one after stop-after-unload.
+        assert afc.reactor.pause.call_count == 2
 
     def test_follower_reverse_failure_logged_as_warning(self):
         oams = self._ready_oams()
@@ -5141,6 +5465,9 @@ class TestOamsUnload:
 
         ams._oams_extrude.assert_called_once()
         assert ams._oams_extrude.call_args[0][0] == -25.0  # -(15+10)
+        assert any(
+            lvl == "debug" and "Retracting 25.0mm from extruder" in m
+            for lvl, m in ams.logger.messages)
 
     def test_pre_retract_skipped_when_tool_stn_unload_zero(self):
         oams = self._ready_oams()
@@ -5181,6 +5508,10 @@ class TestOamsUnload:
         assert lane._oams_runout_empty is False
         oams.unload_spool_with_retry.assert_not_called()
         oams.determine_current_spool.assert_not_called()
+        assert any(
+            lvl == "info"
+            and "Skipping OAMS hardware unload for lane1" in m
+            for lvl, m in ams.logger.messages)
 
     def test_no_spool_loaded_skips_redundant_unload(self):
         oams = self._ready_oams(hw_spool=None)
@@ -5193,6 +5524,10 @@ class TestOamsUnload:
         assert result is True
         assert oams.current_spool is None
         oams.unload_spool_with_retry.assert_not_called()
+        assert any(
+            lvl == "info"
+            and "OAMS reports no spool loaded; skipping redundant" in m
+            for lvl, m in ams.logger.messages)
 
     def test_spool_present_runs_hardware_unload(self):
         oams = self._ready_oams(hw_spool=0)
@@ -5227,6 +5562,9 @@ class TestOamsUnload:
 
         assert result is True
         assert oams.current_spool is None
+        assert any(
+            lvl == "debug" and "Could not query OAMS current spool: busy" in m
+            for lvl, m in ams.logger.messages)
 
     def test_concurrent_retract_gcode_sent(self):
         oams = self._ready_oams()
@@ -5238,6 +5576,7 @@ class TestOamsUnload:
         ams._oams_unload(self._lane())
 
         afc.gcode.run_script_from_command.assert_any_call("M83")
+        afc.gcode.run_script_from_command.assert_any_call("G1 E-20.00 F1500")
 
     def test_concurrent_retract_failure_logged_as_warning(self):
         oams = self._ready_oams()
@@ -5477,6 +5816,9 @@ class TestCalibrateTd1:
         assert success is False
         assert "did not detect filament" in msg
         ams._unload_after_td1.assert_called_once_with(lane, ams._get_openams_spool_index(lane))
+        assert any(
+            lvl == "info" and m.startswith("TD-1 cal: FPS pressure 0.90")
+            for lvl, m in ams.logger.messages)
 
     def test_td1_loop_times_out_without_detection(self):
         oams = MagicMock()
@@ -5520,16 +5862,38 @@ class TestCalibrateTd1:
         ams._cancel_and_mark_loaded = MagicMock()
         ams._wait_for_idle = MagicMock(return_value=True)
         ams._unload_after_td1 = MagicMock()
+        reactor.pause = MagicMock()
         lane = self._lane()
 
         success, msg, delta = ams.calibrate_td1(lane, 0, 0)
 
         assert success is True
         assert delta == 100  # |encoder_at_td1(250) - encoder_at_hub(150)|
+        # At least one pause in the hub-wait loop and one in the TD-1 poll loop.
+        assert reactor.pause.call_count >= 2
         afc.function.ConfigRewrite.assert_called_once()
         lane.unit_obj.return_to_home.assert_called_once()
         afc.save_vars.assert_called_once()
         lane.do_enable.assert_called_once_with(False)
+        ams._cancel_and_mark_loaded.assert_called_once_with(0, "lane1")
+        ams._wait_for_idle.assert_called_once()
+        assert (
+            "raw", "TD-1 calibration: continuous load for lane1"
+        ) in ams.logger.messages
+        assert (
+            "info", "TD-1 cal: hub triggered, encoder=150"
+        ) in ams.logger.messages
+        assert any(
+            lvl == "info" and m.startswith("TD-1 cal: DETECTED!")
+            for lvl, m in ams.logger.messages)
+        assert any(
+            lvl == "info" and m.startswith(
+                "TD-1 calibration for lane1: hub=150, td1=250, distance=100")
+            for lvl, m in ams.logger.messages)
+        # Proves the poll loop actually iterated (pausing each time) and
+        # accumulated encoder samples into the history list passed through.
+        history_arg = ams._interpolate_encoder_at_scan.call_args[0][1]
+        assert len(history_arg) >= 1
 
     def test_td1_snapshot_unchanged_keeps_polling_then_detects(self):
         oams = MagicMock()
@@ -5617,7 +5981,14 @@ class TestCalibrateTd1:
         exercise the `len(encoder_history) > 600` branch is to actually let
         the TD-1 polling loop run past 600 iterations. A tiny clock step
         relative to the 120s timeout gets well past that with no real
-        delay -- each iteration is just a few mock calls."""
+        delay -- each iteration is just a few mock calls.
+
+        Note: the `encoder_history.pop(0)` trim itself has no externally
+        observable effect (the list is local and never returned/exposed),
+        so this test can only prove the branch's *condition* is reached,
+        not that the trim itself ran -- accepted the same way as the one
+        fully-redundant line documented in TestAfcAMSInit.
+        """
         oams = MagicMock()
         oams.hub_hes_value = [1, 0, 0, 0]
         oams.encoder_clicks = 100
@@ -5835,6 +6206,7 @@ class TestCaptureTd1WithOams:
         oams.hub_hes_value = [0, 0, 0, 0]
         ams, afc, printer, reactor = _make_ams(oams=oams)
         self._clock(reactor, step=1.0)  # small step: loop body must actually run
+        reactor.pause = MagicMock()
         ams._cancel_and_mark_loaded = MagicMock()
         ams._clear_lane_state_after_td1 = MagicMock()
         lane = self._lane()
@@ -5846,6 +6218,9 @@ class TestCaptureTd1WithOams:
         oams.unload_spool.assert_called_once()
         oams.clear_errors.assert_called_once()
         ams._clear_lane_state_after_td1.assert_called_once_with(lane)
+        ams._cancel_and_mark_loaded.assert_called_once_with(0, "lane1")
+        oams.set_oams_follower.assert_called_once_with(0, 0)
+        assert reactor.pause.call_count >= 1
 
     def test_hub_wait_check_exception_is_swallowed(self):
         class _PhasedOams:
@@ -5911,6 +6286,10 @@ class TestCaptureTd1WithOams:
 
         assert success is False
         assert "Unable to read encoder" in msg
+        ams._cancel_and_mark_loaded.assert_called_once_with(0, "lane1")
+        oams.unload_spool.assert_called_once()
+        oams.clear_errors.assert_called_once()
+        ams._clear_lane_state_after_td1.assert_called_once_with(lane)
 
     def test_encoder_before_failure_cleanup_step_failures_are_all_swallowed(self):
         oams = MagicMock()
@@ -6019,8 +6398,10 @@ class TestCaptureTd1WithOams:
         oams.encoder_clicks = 1000
         ams, afc, printer, reactor = _make_ams(oams=oams)
         self._clock(reactor, step=1.0)
+        reactor.pause = MagicMock()
         ams._get_td1_snapshot = MagicMock(
-            side_effect=[None, ("2024-01-01T00:00:00Z", 1.75, "#fff")])
+            # baseline (None), one unchanged poll (still None), then changed.
+            side_effect=[None, None, ("2024-01-01T00:00:00Z", 1.75, "#fff")])
         afc.moonraker.get_td1_data = MagicMock(
             return_value={"td1_a": {"td": 1.75, "color": "#fff"}})
         ams._cancel_and_mark_loaded = MagicMock()
@@ -6032,7 +6413,12 @@ class TestCaptureTd1WithOams:
         assert success is True
         assert msg == "TD-1 data captured"
         assert lane.td1_data == {"td": 1.75, "color": "#fff"}
+        assert (
+            "info", "lane1 TD-1 data captured: td=1.75 color=#fff"
+        ) in ams.logger.messages
         afc.save_vars.assert_called_once()
+        assert reactor.pause.call_count >= 1
+        ams._cancel_and_mark_loaded.assert_called_once_with(0, "lane1")
 
     def test_td1_detected_but_moonraker_read_fails(self):
         oams = MagicMock()
@@ -6092,6 +6478,10 @@ class TestSystemTest:
         assert result is True
         afc.spool.clear_values.assert_called_once_with(lane)
         ams.lane_loaded.assert_not_called()
+        afc.function.afc_led.assert_called_once_with(lane.led_not_ready, lane.led_index)
+        assert any(
+            lvl == "info" and m.startswith("lane1 tool cmd: T0 ")
+            for lvl, m in ams.logger.messages)
 
     def test_remembered_spool_skips_clear_values(self):
         oams = MagicMock()
@@ -6146,6 +6536,27 @@ class TestSystemTest:
         afc.spool.set_active_spool.assert_called_once_with(lane.spool_id)
         ams.lane_tool_loaded.assert_called_once_with(lane)
         lane.enable_buffer.assert_called_once()
+        lane.sync_to_extruder.assert_called_once()
+
+    def test_tool_loaded_active_lane_fires_tool_loaded_event(self):
+        oams = MagicMock()
+        oams.f1s_hes_value = [1, 0, 0, 0]
+        oams.hub_hes_value = [0, 0, 0, 0]
+        ams, afc, printer, reactor = _make_ams(oams=oams)
+        ams.lane_loaded = MagicMock()
+        ams.lane_illuminate_spool = MagicMock()
+        ams.lane_tool_loaded = MagicMock()
+        printer.send_event = MagicMock(wraps=printer.send_event)
+        ext = MagicMock()
+        ext.lane_loaded = "lane1"
+        ext.prep_on_shuttle_check.return_value = ""
+        lane = _make_lane("lane1", tool_loaded=True, extruder_obj=ext)
+        ams._spool_map["lane1"] = 0
+        afc.current = "lane1"
+
+        ams.system_Test(lane, 0, False, True)
+
+        printer.send_event.assert_called_once_with("afc:tool_loaded", lane)
 
     def test_tool_loaded_inactive_lane_sets_idle_state(self):
         oams = MagicMock()

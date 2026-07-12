@@ -354,9 +354,12 @@ class TestSetConfigBit:
     def test_enable_true_sets_bit(self):
         sensor = _make_sensor()
         sensor.i2c.i2c_read.return_value = {"response": bytearray([0x00, 0x00])}
+        sensor.reactor.pause = MagicMock()
         sensor._set_config_bit(HEATER_ENABLE_BIT, True)
         written = sensor.i2c.i2c_write.call_args_list[-1][0][0]
         assert written == [CONF_REG, HEATER_ENABLE_BIT >> 8, 0x00]
+        # One pause from the internal register read, one after the write.
+        assert sensor.reactor.pause.call_count == 2
 
     def test_enable_false_clears_bit(self):
         sensor = _make_sensor()
@@ -375,9 +378,11 @@ class TestReadTemp:
         sensor = _make_sensor()
         # raw = 0x8000 (32768) -> (32768/65536)*165 - 40 = 42.5
         sensor.i2c.i2c_read.return_value = {"response": bytearray([0x80, 0x00])}
+        sensor.reactor.pause = MagicMock()
         celsius, ok = sensor._read_temp()
         assert ok is True
         assert celsius == pytest.approx(42.5)
+        sensor.reactor.pause.assert_called_once()
 
     def test_i2c_exception_returns_zero_and_false(self, caplog):
         import logging
@@ -401,9 +406,11 @@ class TestReadHumidity:
         sensor = _make_sensor()
         # raw = 0x8000 -> (32768/65536)*100 = 50.0
         sensor.i2c.i2c_read.return_value = {"response": bytearray([0x80, 0x00])}
+        sensor.reactor.pause = MagicMock()
         percent, ok = sensor._read_humidity()
         assert ok is True
         assert percent == pytest.approx(50.0)
+        sensor.reactor.pause.assert_called_once()
 
     def test_i2c_exception_returns_zero_and_false(self, caplog):
         import logging
@@ -434,12 +441,14 @@ class TestSample:
 
     def test_both_ok_calls_callback_and_checks_range(self):
         sensor = _make_sensor(init_sent=True)
+        sensor._consecutive_errors = 3  # seed nonzero so the reset-to-0 below is proven
         sensor._read_temp = MagicMock(return_value=(50.0, True))
         sensor._read_humidity = MagicMock(return_value=(40.0, True))
         sensor.min_temp = 0.0
         sensor.max_temp = 100.0
         sensor.i2c.get_mcu.return_value.estimated_print_time.return_value = 123.0
         sensor.printer.invoke_shutdown = MagicMock()
+        sensor.reactor.pause = MagicMock()
 
         result = sensor._sample(100.0)
 
@@ -450,6 +459,7 @@ class TestSample:
         sensor.printer.invoke_shutdown.assert_not_called()
         sensor._callback.assert_called_once_with(123.0, 50.0)
         assert result == sensor.reactor.monotonic() + sensor.report_time
+        sensor.reactor.pause.assert_called_once()
 
     def test_temp_ok_out_of_range_invokes_shutdown(self):
         sensor = _make_sensor(init_sent=True)

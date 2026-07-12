@@ -430,6 +430,7 @@ class MockAFC:
         self.toolhead = MagicMock()
 
         self.save_pos = MagicMock()
+        self.move_z_pos = MagicMock()
         self.CHANGE_TOOL = MagicMock()
         self.restore_pos = MagicMock()
 

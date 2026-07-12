@@ -238,6 +238,48 @@ class TestInit:
         assert oams.retry_delay == 3.0
         assert oams.auto_unload_on_failed_load is True
 
+    def test_registers_mcu_responses_and_config_callback(self):
+        config, printer, afc = self._config()
+        with patch("extras.AFC_OAMS.AMSHardwareService") as mock_service_cls:
+            mock_service_cls.for_printer.return_value = MagicMock()
+            oams = AFC_OAMS(config)
+        registered_messages = [c[0][1] for c in oams.mcu.register_response.call_args_list]
+        assert "oams_action_status" in registered_messages
+        assert "oams_cmd_stats" in registered_messages
+        assert "oams_cmd_current_status" in registered_messages
+        oams.mcu.register_config_callback.assert_any_call(oams._build_config)
+
+    def test_calls_register_commands_during_construction(self):
+        config, printer, afc = self._config()
+        printer._gcode = MagicMock()
+        with patch("extras.AFC_OAMS.AMSHardwareService") as mock_service_cls:
+            mock_service_cls.for_printer.return_value = MagicMock()
+            oams = AFC_OAMS(config)
+        assert printer._gcode.register_mux_command.call_count == 11
+        assert oams._cached_gcode is printer._gcode
+
+    def test_default_runtime_state(self):
+        config, printer, afc = self._config()
+        with patch("extras.AFC_OAMS.AMSHardwareService") as mock_service_cls:
+            mock_service_cls.for_printer.return_value = MagicMock()
+            oams = AFC_OAMS(config)
+        assert oams.current_spool is None
+        assert oams.encoder_clicks == 0
+        assert oams.i_value == 0.0
+        assert oams.action_status is None
+        assert oams.action_status_code is None
+        assert oams.action_status_value is None
+        assert oams.load_stall_grace == 3.0
+        assert oams.load_stall_dwell == 5.0
+        assert oams._load_retry_state == {}
+        assert oams._unload_retry_count == 0
+        assert oams._last_unload_attempt == 0.0
+        assert oams._last_successful_load == {}
+        assert oams._load_retry_failures == 0
+        assert oams._unload_retry_failures == 0
+        assert oams._last_load_failure_time is None
+        assert oams._last_unload_failure_time is None
+
     def test_attaches_hardware_service_on_success(self):
         config, printer, afc = self._config()
         service = MagicMock()
@@ -407,6 +449,7 @@ class TestBayHelpers:
     def test_is_bay_loaded_out_of_range(self):
         oams = _make_oams()
         assert oams.is_bay_loaded(-1) is False
+        assert ("error", "Invalid bay_index -1, must be 0-3") in oams.logger.messages
 
     def test_get_spool_status_in_range(self):
         oams = _make_oams()
@@ -416,6 +459,7 @@ class TestBayHelpers:
     def test_get_spool_status_out_of_range_returns_zero(self):
         oams = _make_oams()
         assert oams.get_spool_status(5) == 0
+        assert ("error", "Invalid bay_index 5, must be 0-3") in oams.logger.messages
 
 
 # ── handle_connect ────────────────────────────────────────────────────────────
@@ -424,9 +468,10 @@ class TestHandleConnect:
     def test_looks_up_all_commands_and_clears_errors(self):
         oams = _make_oams()
         cmd_obj = MagicMock()
+        query_cmd_obj = MagicMock()
         oams.mcu.lookup_command = MagicMock(return_value=cmd_obj)
         oams.mcu.alloc_command_queue = MagicMock(return_value=MagicMock())
-        oams.mcu.lookup_query_command = MagicMock(return_value=MagicMock())
+        oams.mcu.lookup_query_command = MagicMock(return_value=query_cmd_obj)
         oams.clear_errors = MagicMock()
 
         oams.handle_connect()
@@ -434,6 +479,7 @@ class TestHandleConnect:
         assert oams.oams_load_spool_cmd is cmd_obj
         assert oams.oams_unload_spool_cmd is cmd_obj
         assert oams.oams_load_spool_cancel_cmd is cmd_obj
+        assert oams.oams_spool_query_spool_cmd is query_cmd_obj
         oams.clear_errors.assert_called_once()
 
     def test_cancel_command_missing_sets_cancel_cmd_none(self):
@@ -490,6 +536,9 @@ class TestHandleReady:
         assert oams.action_status is None
         assert oams.action_status_code is None
         assert oams.action_status_value is None
+        assert (
+            "info", "OAMS[0]: Cleared software error states on ready"
+        ) in oams.logger.messages
 
 
 # ── clear_errors / set_led_error / determine_current_spool ──────────────────
@@ -559,6 +608,7 @@ class TestSetLedError:
         oams = _make_oams()
         oams.set_led_error(2, 1)
         oams.oams_set_led_error_cmd.send.assert_called_once_with([2, 1])
+        assert ("debug", "Setting LED 2 to 1") in oams.logger.messages
 
 
 class TestDetermineCurrentSpool:
@@ -566,11 +616,18 @@ class TestDetermineCurrentSpool:
         oams = _make_oams()
         oams.oams_spool_query_spool_cmd.send = MagicMock(return_value=None)
         assert oams.determine_current_spool() is None
+        assert (
+            "warning",
+            "OAMS[0]: Failed to query current spool - no response from MCU",
+        ) in oams.logger.messages
 
     def test_missing_spool_field_returns_none(self):
         oams = _make_oams()
         oams.oams_spool_query_spool_cmd.send = MagicMock(return_value={})
         assert oams.determine_current_spool() is None
+        assert (
+            "warning", "OAMS[0]: Spool query response missing 'spool' field"
+        ) in oams.logger.messages
 
     def test_valid_spool_index_returned(self):
         oams = _make_oams()
@@ -581,6 +638,9 @@ class TestDetermineCurrentSpool:
         oams = _make_oams()
         oams.oams_spool_query_spool_cmd.send = MagicMock(return_value={"spool": 255})
         assert oams.determine_current_spool() is None
+        assert (
+            "debug", "OAMS[0]: No spool loaded (hardware returned 255)"
+        ) in oams.logger.messages
 
     def test_unexpected_value_logs_warning_and_returns_none(self):
         oams = _make_oams()
@@ -641,6 +701,7 @@ class TestRetryStatusCommand:
         gcmd = _make_gcmd()
         oams.cmd_OAMS_RETRY_STATUS(gcmd)
         msg = gcmd.respond_info.call_args[0][0]
+        assert "Load retry counts:" in msg
         assert "Spool 0: 1/3" in msg
 
 
@@ -693,6 +754,7 @@ class TestLoadSpoolWithRetry:
     def test_success_after_one_retry_marks_was_retry(self):
         oams = _make_oams()
         oams.abort_current_action = MagicMock()
+        oams.reactor.pause = MagicMock()
         oams.unload_spool_with_retry = MagicMock(return_value=(True, "unloaded"))
         oams.load_spool = MagicMock(
             side_effect=[
@@ -705,6 +767,15 @@ class TestLoadSpoolWithRetry:
         assert oams.last_load_was_retry(1) is False  # state reset after success
         assert oams.load_spool.call_count == 2
         oams.abort_current_action.assert_called_once()
+        # Both the pre-retry delay pause and the post-abort pause fire.
+        assert oams.reactor.pause.call_count == 2
+        assert any(
+            lvl == "warning" and "Attempt 1/3" in m for lvl, m in oams.logger.messages)
+        assert any(
+            lvl == "info" and "Load retry 2/3" in m for lvl, m in oams.logger.messages)
+        assert any(
+            lvl == "info" and "Successfully loaded" in m and "attempt 2" in m
+            for lvl, m in oams.logger.messages)
 
     def test_auto_unload_failure_aborts_load(self):
         oams = _make_oams()
@@ -719,6 +790,13 @@ class TestLoadSpoolWithRetry:
         assert "Failed to unload" in message
         assert oams._load_retry_failures == 1
         assert oams._last_load_failure_time is not None
+        assert (
+            "info", "OAMS[0]: Auto-unloading before retry"
+        ) in oams.logger.messages
+        assert (
+            "error", "OAMS[0]: Failed to unload before retry: unload failed"
+        ) in oams.logger.messages
+        assert 0 not in oams._load_retry_state
 
     def test_all_attempts_fail_returns_history(self):
         oams = _make_oams()
@@ -730,8 +808,12 @@ class TestLoadSpoolWithRetry:
 
         assert success is False
         assert "after 2 attempts" in message
+        assert "Attempt 1: nope" in message  # attempt_history entries surface in the message
         assert oams._load_retry_failures == 1
         assert 0 not in oams._load_retry_state
+        assert oams._last_load_failure_time is not None
+        assert any(
+            lvl == "warning" and "Attempt 1/2" in m for lvl, m in oams.logger.messages)
 
     def test_no_auto_unload_skips_unload_call(self):
         oams = _make_oams()
@@ -812,10 +894,15 @@ class TestUnloadSpoolWithRetry:
         success, message = oams.unload_spool_with_retry()
         assert success is True
         assert oams._unload_retry_count == 0
+        assert oams._last_unload_attempt == 0.0
+        assert any(
+            lvl == "info" and "Successfully unloaded" in m and "attempt 1" in m
+            for lvl, m in oams.logger.messages)
 
     def test_success_after_retry_retracts_extruder(self):
         oams = _make_oams()
         oams.abort_current_action = MagicMock()
+        oams.reactor.pause = MagicMock()
         oams.unload_spool = MagicMock(
             side_effect=[(False, "busy"), (True, "unloaded")]
         )
@@ -826,6 +913,15 @@ class TestUnloadSpoolWithRetry:
 
         assert success is True
         assert gcode.run_script_from_command.call_count == 4  # M83, G92, G1, M400
+        oams.abort_current_action.assert_called_once()
+        assert oams.reactor.pause.call_count == 2  # pre-retry delay + post-abort
+        assert any(
+            lvl == "info" and "Unload retry 2/3" in m for lvl, m in oams.logger.messages)
+        assert any(
+            lvl == "warning" and "Attempt 1/3" in m for lvl, m in oams.logger.messages)
+        assert any(
+            lvl == "info" and "Successfully unloaded" in m and "attempt 2" in m
+            for lvl, m in oams.logger.messages)
 
     def test_retract_failure_is_logged_but_retry_continues(self):
         oams = _make_oams()
@@ -848,7 +944,12 @@ class TestUnloadSpoolWithRetry:
     def test_all_attempts_fail(self):
         oams = _make_oams()
         oams.abort_current_action = MagicMock()
-        oams.unload_spool = MagicMock(return_value=(False, "busy"))
+        captured_attempt_times = []
+
+        def fake_unload():
+            captured_attempt_times.append(oams._last_unload_attempt)
+            return (False, "busy")
+        oams.unload_spool = MagicMock(side_effect=fake_unload)
         gcode = MagicMock()
         oams._cached_gcode = gcode
 
@@ -857,6 +958,15 @@ class TestUnloadSpoolWithRetry:
         assert success is False
         assert "after 2 attempts" in message
         assert oams._unload_retry_failures == 1
+        assert oams._last_unload_failure_time is not None
+        # _last_unload_attempt is stamped with reactor.monotonic() before
+        # every attempt, so both captured attempts should show the (fixed
+        # mock) reactor time rather than the 0.0 default.
+        assert captured_attempt_times == [100.0, 100.0]
+        assert "Attempt 1: busy" in message  # attempt_history entries surface in the message
+        assert any(
+            lvl == "warning" and "Attempt 1/2" in m for lvl, m in oams.logger.messages)
+        assert oams._unload_retry_count == 0  # reset even on total failure
 
     def test_zero_max_retries_falls_back_to_configured_max(self):
         """max_retries=0 (falsy/non-positive) now falls back to the
@@ -952,6 +1062,8 @@ class TestCurrentPidSetCommand:
         assert oams.current_kp == 1.0
         assert oams.current_ki == 2.0
         assert oams.current_kd == 3.0
+        gcmd.respond_info.assert_called_once_with(
+            "Current PID values set to P=1.000000 I=2.000000 D=3.000000 TARGET=0.350000")
 
     def test_explicit_target_overrides_default(self):
         oams = _make_oams()
@@ -989,6 +1101,9 @@ class TestPidSetCommand:
         assert oams.ki == 0.1
         assert oams.kd == 0.2
         assert oams.fps_target == 0.6
+        oams.oams_pid_cmd.send.assert_called_once()
+        gcmd.respond_info.assert_called_once_with(
+            "PID values set to P=4.000000 I=0.100000 D=0.200000 TARGET=0.600000")
 
     def test_explicit_target_used(self):
         oams = _make_oams()
@@ -1046,6 +1161,7 @@ class TestCalibrateHubHesCommand:
 
     def test_success_saves_calibration(self):
         oams = _make_oams()
+        oams.action_status = OAMSStatus.CALIBRATING
         oams.action_status_code = OAMSOpCode.SUCCESS
         oams.action_status_value = oams.float_to_u32(0.55)
         gcmd = _make_gcmd({"SPOOL": 1})
@@ -1056,7 +1172,12 @@ class TestCalibrateHubHesCommand:
 
         oams.cmd_OAMS_CALIBRATE_HUB_HES(gcmd)
 
+        oams.oams_calibrate_hub_hes_cmd.send.assert_called_once_with([1])
         assert oams.hub_hes_on[1] == pytest.approx(0.55, rel=1e-4)
+        gcmd.respond_info.assert_any_call(
+            "Calibrated HES 1 to 0.550000 threshold")
+        gcmd.respond_info.assert_any_call(
+            "HES calibration complete: hub_hes_on index 1 = 0.550000 saved to config")
         oams.afc.function.ConfigRewrite.assert_called_once()
 
     def test_failure_calls_gcmd_error(self):
@@ -1096,6 +1217,7 @@ class TestCalibratePtfeLengthCommand:
 
     def test_success_saves_calibration(self):
         oams = _make_oams()
+        oams.action_status = OAMSStatus.CALIBRATING
         oams.action_status_code = OAMSOpCode.SUCCESS
         oams.action_status_value = 850
 
@@ -1106,7 +1228,11 @@ class TestCalibratePtfeLengthCommand:
 
         oams.cmd_OAMS_CALIBRATE_PTFE_LENGTH(gcmd)
 
+        oams.oams_calibrate_ptfe_length_cmd.send.assert_called_once_with([0])
         oams.afc.function.ConfigRewrite.assert_called_once()
+        gcmd.respond_info.assert_any_call("Calibrated PTFE length to 850")
+        gcmd.respond_info.assert_any_call(
+            "PTFE calibration complete: ptfe_length 850 saved to config")
 
     def test_failure_calls_gcmd_error(self):
         oams = _make_oams()
@@ -1150,6 +1276,7 @@ class TestLoadSpool:
         assert code == OAMSOpCode.SUCCESS
         assert oams.current_spool == 2
         assert message == "Spool loaded successfully"
+        oams.oams_load_spool_cmd.send.assert_called_once_with([2])
 
     def test_error_klipper_call(self):
         oams = _make_oams()
@@ -1214,6 +1341,11 @@ class TestLoadSpool:
         assert code == OAMSOpCode.ERROR_UNSPECIFIED
         assert "timed out" in message
         oams.load_spool_cancel.assert_called_once()
+        assert oams.action_status is None
+        assert oams.action_status_code == OAMSOpCode.ERROR_UNSPECIFIED
+        assert (
+            "error", "OAMS[0]: Load operation timed out after 45 seconds"
+        ) in oams.logger.messages
 
     def test_stall_detected_cancels_and_returns_error(self):
         oams = _make_oams()
@@ -1232,6 +1364,12 @@ class TestLoadSpool:
         assert code == OAMSOpCode.ERROR_UNSPECIFIED
         assert "stalled" in message
         oams.load_spool_cancel.assert_called_once()
+        assert oams.action_status is None
+        assert oams.action_status_code == OAMSOpCode.ERROR_UNSPECIFIED
+        assert (
+            "error",
+            "OAMS[0]: Load stalled - encoder stopped advancing for 5s (spool stuck)",
+        ) in oams.logger.messages
 
     def test_encoder_movement_resets_stall_timer_then_succeeds(self):
         oams = _make_oams()
@@ -1329,6 +1467,7 @@ class TestLoadSpoolCommand:
         gcmd = _make_gcmd({"SPOOL": 0, "QUIET": 0})
         oams.cmd_OAMS_LOAD_SPOOL(gcmd)
         gcmd.respond_info.assert_called_once_with("ok")
+        assert oams.action_status == OAMSStatus.LOADING
 
     def test_failure_calls_gcmd_error(self):
         oams = _make_oams()
@@ -1353,6 +1492,7 @@ class TestUnloadSpool:
         success, message = oams.unload_spool()
         assert success is True
         assert oams.current_spool is None
+        oams.oams_unload_spool_cmd.send.assert_called_once_with()
 
     def test_no_spool_in_bay_treated_as_success(self):
         oams = _make_oams()
@@ -1426,6 +1566,11 @@ class TestUnloadSpool:
         success, message = oams.unload_spool()
         assert success is False
         assert "timed out" in message
+        assert oams.action_status is None
+        assert oams.action_status_code == OAMSOpCode.ERROR_UNSPECIFIED
+        assert (
+            "error", "OAMS[0]: Unload operation timed out after 40 seconds"
+        ) in oams.logger.messages
 
     def test_loop_body_pauses_before_success(self):
         oams = _make_oams()
@@ -1512,6 +1657,7 @@ class TestAbortCurrentAction:
     def test_wait_true_clears_when_action_completes(self):
         oams = _make_oams()
         oams.action_status = OAMSStatus.LOADING
+        oams.action_status_value = 123  # seed nonzero so the reset below is proven
         oams.load_spool_cancel = MagicMock()
         calls = {"n": 0}
 
@@ -1525,7 +1671,12 @@ class TestAbortCurrentAction:
 
         assert oams.action_status is None
         assert oams.action_status_code == OAMSOpCode.ERROR_KLIPPER_CALL
+        assert oams.action_status_value is None
         oams.load_spool_cancel.assert_called_once()
+        assert any(
+            lvl == "debug" and "Aborting current action" in m
+            for lvl, m in oams.logger.messages)
+        assert ("info", "OAMS[0]: Abort complete") in oams.logger.messages
 
     def test_wait_true_forces_clear_on_timeout(self):
         oams = _make_oams()
@@ -1541,14 +1692,22 @@ class TestAbortCurrentAction:
         oams.abort_current_action(wait=True)
 
         assert oams.action_status is None
+        assert (
+            "debug", "OAMS[0]: Abort timeout - forcing clear"
+        ) in oams.logger.messages
 
     def test_wait_false_clears_immediately(self):
         oams = _make_oams()
         oams.action_status = OAMSStatus.UNLOADING
+        oams.action_status_value = 456  # seed nonzero so the reset below is proven
         oams.load_spool_cancel = MagicMock()
         oams.abort_current_action(code=OAMSOpCode.ERROR_BUSY, wait=False)
         assert oams.action_status is None
         assert oams.action_status_code == OAMSOpCode.ERROR_BUSY
+        assert oams.action_status_value is None
+        assert (
+            "debug", "OAMS[0]: Abort without waiting - status cleared"
+        ) in oams.logger.messages
 
     def test_cancel_failure_is_logged_not_raised(self):
         oams = _make_oams()
@@ -1613,16 +1772,18 @@ class TestOamsCmdStats:
         oams = _make_oams()
         params = {
             "fps_value": oams.float_to_u32(0.75),
-            "f1s_hes_value_0": 1, "f1s_hes_value_1": 0,
-            "f1s_hes_value_2": 1, "f1s_hes_value_3": 0,
-            "hub_hes_value_0": 0, "hub_hes_value_1": 1,
-            "hub_hes_value_2": 0, "hub_hes_value_3": 1,
+            # Every index differs from the [0, 0, 0, 0] pre-existing default
+            # so a missing per-index assignment is actually observable.
+            "f1s_hes_value_0": 1, "f1s_hes_value_1": 1,
+            "f1s_hes_value_2": 1, "f1s_hes_value_3": 1,
+            "hub_hes_value_0": 1, "hub_hes_value_1": 1,
+            "hub_hes_value_2": 1, "hub_hes_value_3": 1,
             "encoder_clicks": 500,
         }
         oams._oams_cmd_stats(params)
         assert oams.fps_value == pytest.approx(0.75)
-        assert oams.f1s_hes_value == [1, 0, 1, 0]
-        assert oams.hub_hes_value == [0, 1, 0, 1]
+        assert oams.f1s_hes_value == [1, 1, 1, 1]
+        assert oams.hub_hes_value == [1, 1, 1, 1]
         assert oams.encoder_clicks == 500
 
 
@@ -1650,6 +1811,7 @@ class TestOamsActionStatus:
         oams._oams_action_status({"action": OAMSStatus.LOADING, "code": OAMSOpCode.SUCCESS})
         assert oams.action_status is None
         assert oams.action_status_code == OAMSOpCode.SUCCESS
+        assert ("debug", "OAMS status received") in oams.logger.messages
 
     def test_unloading_action_clears_status(self):
         oams = _make_oams()
@@ -1664,6 +1826,7 @@ class TestOamsActionStatus:
 
     def test_calibrating_action_captures_value(self):
         oams = _make_oams()
+        oams.action_status = OAMSStatus.CALIBRATING  # seed so the clear-to-None below is proven
         oams._oams_action_status(
             {"action": OAMSStatus.CALIBRATING, "code": OAMSOpCode.SUCCESS, "value": 12345}
         )
@@ -1673,6 +1836,7 @@ class TestOamsActionStatus:
 
     def test_error_klipper_call_code_clears_status_for_other_actions(self):
         oams = _make_oams()
+        oams.action_status = OAMSStatus.COASTING  # seed so the clear-to-None below is proven
         # action is a "non-action" status but code is ERROR_KLIPPER_CALL
         oams._oams_action_status(
             {"action": OAMSStatus.COASTING, "code": OAMSOpCode.ERROR_KLIPPER_CALL}
@@ -1688,12 +1852,19 @@ class TestOamsActionStatus:
         )
         # non-action status: action_status untouched
         assert oams.action_status == "unchanged"
+        assert (
+            "debug",
+            "OAMS status update (non-action): forward following (success)",
+        ) in oams.logger.messages
 
     def test_unhandled_status_logged_as_debug(self):
         oams = _make_oams()
         oams.action_status = "unchanged"
         oams._oams_action_status({"action": 999, "code": OAMSOpCode.SUCCESS})
         assert oams.action_status == "unchanged"
+        assert (
+            "debug", "OAMS status update (unhandled): action 999 (success)"
+        ) in oams.logger.messages
 
 
 # ── float_to_u32 / u32_to_float ───────────────────────────────────────────────
