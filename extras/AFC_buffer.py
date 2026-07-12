@@ -904,10 +904,8 @@ class AFCFPSBuffer(AFCBuffer):
         self.multiplier_low: float = config.getfloat('multiplier_low', 0.85, minval=0.0, maxval=1.0)
         self.trailing_min_multiplier: float = config.getfloat('trailing_min_multiplier', 1.00, minval=1.0)
 
-        # Deadband — total width of the neutral window centered on set_point
-        # No correction applied when FPS is within this range.
-        # Gives headroom for fast retractions and tool changes without fighting.
-        # Default 0.30 → window from .35 to .65 (set_point ± deadband/2)
+        # Deadband — neutral window centered on set_point where no correction
+        # is applied, giving headroom for retractions/tool changes.
         self.deadband: float = config.getfloat('deadband', 0.30, minval=0.0, maxval=0.6)
 
         # Validate that low_point < set_point < high_point
@@ -932,55 +930,28 @@ class AFCFPSBuffer(AFCBuffer):
 
         # Timer interval for applying corrections
         self.update_interval: float = config.getfloat('update_interval', 0.25, minval=0.05)
-        # ---- Integral correction (eliminates steady-state error) ----
-        # The proportional correction above recomputes the multiplier from
-        # scratch every tick purely from the instantaneous deviation, so it
-        # has no memory: if base_rotation_dist is even slightly off from the
-        # stepper's true extrusion-per-rev, the system can only hold
-        # set_point by sitting at some nonzero deviation forever (a nonzero
-        # multiplier requires a nonzero deviation to produce it -- that's
-        # the "riding the edge" symptom). This integral term breaks that
-        # link: it slowly accumulates deviation into a persistent bias that
-        # gets added on top of the proportional multiplier each tick, so
-        # holding the needed correction no longer requires a nonzero
-        # deviation to sustain it. base_rotation_dist itself is never
-        # touched -- only the live multiplier is biased. Disabled by
-        # default; opt in once you're comfortable with the base
-        # multiplier_high/low tuning.
+
+        # Slow integral term added on top of the proportional multiplier so a
+        # persistent bias (e.g. a slightly-off rotation_distance) doesn't
+        # force the buffer to sit off set_point forever. Opt-in.
         self.enable_integral_correction: bool = config.getboolean(
             'enable_integral_correction', False)
-        # Multiplier-units nudge per SECOND of active extrusion per unit of
-        # deviation (not per tick -- see the *update_interval below). Kept
-        # deliberately small -- convergence should take tens of seconds to
-        # a couple minutes, not react to a single retraction.
-        #
-        # MIGRATION NOTE: prior to this normalization, integral_gain was
-        # applied directly per tick, so its effective strength was silently
-        # coupled to update_interval -- doubling your tick rate would have
-        # doubled your real-world integration speed for the same configured
-        # value, with no warning. If you tuned a value under the old
-        # behavior, convert it with: new_value = old_value / update_interval
-        # (e.g. an old value of 0.005 at the default update_interval of
-        # 0.25s becomes 0.02 here, for identical real-world behavior).
-        self.integral_gain: float = config.getfloat(
-            'integral_gain', 0.004, minval=0.0, maxval=0.2)
-        # lane_name -> accumulated integral bias (multiplier units, i.e. 0.0
-        # = no bias). Kept per-lane so switching tools doesn't cross-
-        # contaminate one lane's learned bias into another's.
+
+        # Multiplier-units nudge per second of active extrusion per unit of
+        # deviation.
+        self.integral_gain: float = config.getfloat('integral_gain', 0.004, minval=0.0, maxval=0.2)
+
+        # lane_name -> accumulated integral bias, kept per-lane so tool
+        # changes don't cross-contaminate one lane's learned bias into another's.
         self._integral_terms: dict = {}
-        # Last integral value written to the debug log -- used alongside
-        # the multiplier-delta check to decide when to emit a combined
-        # log line, so debug output only fires on a meaningful change
-        # instead of every single tick.
+
+        # Last integral value written to the debug log, so it only logs on change.
         self._last_logged_integral: float = 0.0
-        # Only integrate while filament is actually being driven --
-        # otherwise, e.g. between prints or while paused, the buffer can
-        # sit away from set_point for reasons that have nothing to do with
-        # rotation distance (resting position, no tension at all), and the
-        # integral term would wind up almost immediately for the wrong
-        # reason.
-        self.integral_extrusion_threshold: float = config.getfloat(
-            'integral_extrusion_threshold', 1, minval=0.0)
+
+        # Only integrate while filament is actually moving, so idle time
+        # (paused, between prints) doesn't wind up the integral for no reason.
+        self.integral_extrusion_threshold: float = config.getfloat('integral_extrusion_threshold',
+                                                                   1, minval=0.0)
         self._integral_last_extruder_pos: float = None
         self._last_correction_direction: str = NEUTRAL_STATE_NAME
 
@@ -988,10 +959,7 @@ class AFCFPSBuffer(AFCBuffer):
         self.min_event_systime = self.reactor.NEVER
 
         # ---- Register virtual filament sensors for GUI display ----
-        # Same pattern as TurtleNeck buffer which registers advance/trailing sensors.
-        # These let Mainsail show buffer state (grey = ramming mode) instead of
-        # red (no sensor). The VirtualFilamentSensor tracks advance/trailing state
-        # that gets updated in _adc_callback.
+        # Lets Mainsail show buffer state (grey = ramming) instead of red (no sensor).
         self.adv_filament_switch_name = f"{self.name}_expanded"
         self.fila_adv = VirtualFilamentSensor(self.printer, self.adv_filament_switch_name,
                                               logger=self.logger,
@@ -1010,10 +978,8 @@ class AFCFPSBuffer(AFCBuffer):
         self._last_multiplier = 1.0
         self._saved_multipliers = {}
 
-        # Software endstop wrappers — provide the MCU endstop interface so
-        # klipper's homing system can use FPS thresholds like turtleneck switches.
-        # Advance endstop: triggers at high_point (buffer compressed, filament loaded)
-        # Trailing endstop: triggers at low_point (buffer stretched, spool stuck)
+        # Software endstop wrappers so homing can use FPS thresholds like
+        # turtleneck switches (advance triggers at high_point, trailing at low_point).
         self.fps_endstop = FPSEndstopWrapper(self, lambda: self.buffer_triggered)
         self.fps_trailing_endstop = FPSEndstopWrapper(
             self, lambda: self.buffer_trailing_triggered)
@@ -1100,13 +1066,8 @@ class AFCFPSBuffer(AFCBuffer):
             + (1.0 - self.smoothing) * read_value
         )
 
-        # Keep last_state and advance/trailing booleans current even when
-        # the correction loop isn't running (buffer disabled during
-        # loading / calibration).  Without this, get_toolhead_pre_sensor_state()
-        # returns stale False and load / calibration can't detect
-        # filament arrival at the toolhead.
-        # Update advance/trailing state for non-stepper lanes even when
-        # buffer is enabled — the correction timer doesn't run for them.
+        # Keep last_state/advance/trailing current even when the correction
+        # loop isn't running, so load/calibration can still detect filament arrival.
         has_stepper = self._lane_has_rotation_control(self.current_lane)
 
         # If buffer was enabled before lane stepper wiring was ready,
@@ -1191,10 +1152,8 @@ class AFCFPSBuffer(AFCBuffer):
         deviation = reading - self.set_point  # positive = high/trailing, negative = low/advancing
         half_db = self.deadband / 2.0
 
-        # Continuous proportional multiplier across the full sensor range:
-        #   Above set_point → slow down (multiplier < 1.0), max at high_point
-        #   Below set_point → speed up  (multiplier > 1.0), max at low_point
-        #   At set_point    → neutral   (multiplier = 1.0)
+        # Proportional multiplier across the full range: slow down above
+        # set_point, speed up below it, neutral (1.0) right at set_point.
         if deviation > 0:
             range_size = max(self.high_point - self.set_point, 0.01)
             fraction = min(deviation / range_size, 1.0)
@@ -1209,11 +1168,8 @@ class AFCFPSBuffer(AFCBuffer):
             multiplier = 1.0
 
         # Determine state for LED indication and fault reporting
-        # half_db = self.deadband / 2.0
-        # if reading > self.set_point + half_db:
         if reading < self.set_point - half_db:
             target_direction = ADVANCING_STATE_NAME
-        # elif reading < self.set_point - half_db:
         elif reading > self.set_point + half_db:
             target_direction = TRAILING_STATE_NAME
         else:
@@ -1225,9 +1181,7 @@ class AFCFPSBuffer(AFCBuffer):
             lane_name = self.current_lane.name
             if self._is_extruding():
                 integral -= self.integral_gain * deviation * self.update_interval
-                # Anti-windup: keep the accumulated bias within the same
-                # overall band the multiplier itself is allowed to move in,
-                # so a stuck sensor or a real clog can't wind it up forever.
+                # Anti-windup: clamp so a stuck sensor or real clog can't wind it up forever.
                 integral = max(self.multiplier_low - 1.0,
                                 min(self.multiplier_high - 1.0, integral))
                 self._integral_terms[lane_name] = integral
@@ -1285,10 +1239,8 @@ class AFCFPSBuffer(AFCBuffer):
             )
             self._last_logged_integral = integral
 
-        # Fault detection: update error position as long as correction is
-        # actively working (multiplier applied). Only stop updating when
-        # the reading is stuck at an extreme despite correction — that
-        # indicates a real clog or feed failure.
+        # Update error position while correction is active; stop only when
+        # stuck at an extreme despite correction (real clog/feed failure).
         if self.fault_detection_enabled():
             if (reading <= self.high_point
                 and reading >= self.low_point):
@@ -1340,9 +1292,8 @@ class AFCFPSBuffer(AFCBuffer):
         self.smoothed_fps = self.fps_value
 
         if has_stepper:
-            # Restore the last multiplier for this extruder if the same lane
-            # is coming back (tool change with no spool swap). If a different
-            # lane is on this extruder, it's a new spool — start fresh at 1.0.
+            # Restore the last multiplier if the same lane is coming back;
+            # a different lane on this extruder means a new spool, start at 1.0.
             extruder_name = getattr(getattr(lane, 'extruder_obj', None),
                                     'th_extruder_name', None)
             saved = self._saved_multipliers.get(extruder_name) if extruder_name else None
@@ -1359,17 +1310,15 @@ class AFCFPSBuffer(AFCBuffer):
             self.reactor.update_timer(self.correction_timer, self.reactor.NOW)
             self._correction_running = True
 
-            # Start fault detection — only for stepper lanes where the
-            # correction timer keeps extruder position in sync with buffer.
-            # Non-stepper lanes have no correction, so extruder pos
-            # grows unbounded and falsely triggers the fault.
-            # OpenAMS has its own OAMSMonitor for fault detection.
+            # Only for stepper lanes -- non-stepper lanes have no correction
+            # timer to keep extruder position in sync. OpenAMS uses its own OAMSMonitor.
             if self.fault_detection_enabled():
                 self.start_fault_detection(0, 1.0)
         else:
             self._correction_running = False
 
-        self.logger.debug(f"{self.name} FPS buffer enabled for {self.current_lane.name} (correction={'active' if has_stepper else 'off/adc-only'})")
+        self.logger.debug((f"{self.name} FPS buffer enabled for {self.current_lane.name} "
+                           f"(correction={'active' if has_stepper else 'off/adc-only'})"))
 
     def disable_buffer(self):
         """
@@ -1429,15 +1378,11 @@ class AFCFPSBuffer(AFCBuffer):
 
     def _is_extruding(self) -> bool:
         """
-        Return True when the extruder has actually moved (either direction)
-        by more than integral_extrusion_threshold since the last correction
-        tick.
-
-        Uses the raw current extruder position (not the fault-detection
-        helper's forward-clamped tracker) so retraction/unretraction moves
-        also count -- sync_to_extruder mirrors those onto the lane stepper
-        too, and they're just as valid a signal of real rotation-distance
-        error as forward extrusion.
+        Checks if lanes extruder has actually moved in either direction.
+        
+        :return boolean: Return True when the extruder has actually moved (either direction)
+                         by more than integral_extrusion_threshold since the last correction
+                         tick.
         """
         try:
             current_pos = self.afc.function.get_extruder_pos()
@@ -1505,9 +1450,8 @@ class AFCFPSBuffer(AFCBuffer):
         if (self.afc.function.is_printing(check_movement=True)
             and extruder_pos is not None
             and self.filament_error_pos is not None):
-            # Update error position as long as FPS is within the
-            # correctable range (between low_point and high_point).
-            # Only let it expire when stuck at an extreme.
+            # Keep updating while FPS is in the correctable range; only let
+            # it expire when stuck at an extreme.
             if self.low_point <= self.smoothed_fps <= self.high_point:
                 self.update_filament_error_pos()
                 return eventtime + CHECK_RUNOUT_TIMEOUT

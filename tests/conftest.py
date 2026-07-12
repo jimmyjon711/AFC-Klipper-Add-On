@@ -283,6 +283,22 @@ class MockReactor:
     def unregister_timer(self, timer):
         pass
 
+    def completion(self):
+        return MockCompletion()
+
+
+class MockCompletion:
+    """Lightweight stand-in for Klipper's ReactorCompletion."""
+
+    def __init__(self):
+        self.result = None
+
+    def complete(self, value):
+        self.result = value
+
+    def wait(self, waketime=None, waketime_result=None):
+        return self.result if self.result is not None else waketime_result
+
 
 class MockGcode:
     def __init__(self):
@@ -364,6 +380,10 @@ class MockAFC:
         self.units: dict = {}
         self.buffers: dict = {}
         self.led_obj: dict = {}
+        self.led_buffer_advancing = "1,0,0,0"
+        self.led_buffer_trailing = "0,0,1,0"
+        self.led_buffer_neutral = "0,1,0,0"
+        self.led_buffer_disabled = "0,0,0,0"
         self.current = None
         self.enable_sensors_in_gui = False
         self.debounce_delay = 0.1
