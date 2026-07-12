@@ -952,7 +952,7 @@ class AFCFPSBuffer(AFCBuffer):
         # (paused, between prints) doesn't wind up the integral for no reason.
         self.integral_extrusion_threshold: float = config.getfloat('integral_extrusion_threshold',
                                                                    1, minval=0.0)
-        self._integral_last_extruder_pos: float = None
+        self._integral_last_extruder_pos: Optional[float] = None
         self._last_correction_direction: str = NEUTRAL_STATE_NAME
 
         # ---- Fault detection ----
@@ -1175,7 +1175,8 @@ class AFCFPSBuffer(AFCBuffer):
         else:
             target_direction = NEUTRAL_STATE_NAME
 
-        integral = self._integral_terms.get(self.current_lane.name, 0.0) if self.current_lane else 0.0
+        integral = (self._integral_terms.get(self.current_lane.name, 0.0)
+                    if self.current_lane else 0.0)
         if (self.enable_integral_correction
             and self.current_lane is not None):
             lane_name = self.current_lane.name
