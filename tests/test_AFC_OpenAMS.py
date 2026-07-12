@@ -1322,6 +1322,7 @@ class TestFPSState:
         assert st.clog_active is False
         assert st.clog_start_time is None
         assert st.clog_start_extruder is None
+        assert st.clog_start_extruder_obj is None
         assert st.clog_start_encoder is None
         assert st.engagement_in_progress is False
         assert st.engagement_checked_at is None
@@ -1340,6 +1341,7 @@ class TestFPSState:
         st.clog_active = True
         st.clog_start_time = 30.0
         st.clog_start_extruder = 40.0
+        st.clog_start_extruder_obj = MagicMock()
         st.clog_start_encoder = 50
         st.engagement_in_progress = True
 
@@ -1356,6 +1358,7 @@ class TestFPSState:
         assert st.clog_active is False
         assert st.clog_start_time is None
         assert st.clog_start_extruder is None
+        assert st.clog_start_extruder_obj is None
         assert st.clog_start_encoder is None
         assert st.engagement_in_progress is False
 
@@ -1775,16 +1778,58 @@ class TestCheckClog:
         monitor._check_clog(100.0, encoder_delta=0, pressure=0.50)
         assert monitor.state.clog_start_time == 100.0
         assert monitor.state.clog_start_extruder == 10.0
+        assert monitor.state.clog_start_extruder_obj is fps.extruder
 
-    def test_confirms_clog_after_dwell_and_extrusion_window(self):
+    def test_toolchange_mid_window_resets_start_time(self):
+        """A different extruder object than the one the window started with
+        means a toolchange happened mid-window -- the phantom advance from
+        comparing two extruders' position counters must not count, so the
+        window resets instead of confirming."""
         monitor, reactor, fps = _make_monitor()
+        old_extruder = MagicMock(last_position=0.0)
         monitor.state.last_lane_change_time = 0.0
         monitor.state.clog_start_time = 80.0
         monitor.state.clog_start_extruder = 0.0
+        monitor.state.clog_start_extruder_obj = old_extruder
+        monitor.state.clog_start_encoder = 100
+        monitor.state.last_encoder = 102  # within slack -- would confirm if not reset
+        monitor.clog_dwell = 5.0
+        fps.extruder = MagicMock(last_position=30.0)  # a different extruder object now
+
+        monitor._check_clog(100.0, encoder_delta=0, pressure=0.50)
+
+        assert monitor.state.clog_active is False
+        monitor._on_clog.assert_not_called()
+        # Window restarted fresh against the new extruder, not left at the old start time.
+        assert monitor.state.clog_start_time == 100.0
+        assert monitor.state.clog_start_extruder_obj is fps.extruder
+
+    def test_toolchange_mid_window_does_not_reset_when_no_window_open(self):
+        """clog_start_time is already None (no window in progress) -- an
+        extruder mismatch must not do anything odd in that case."""
+        monitor, reactor, fps = _make_monitor()
+        monitor.state.last_lane_change_time = 0.0
+        monitor.state.clog_start_time = None
+        monitor.state.clog_start_extruder_obj = MagicMock(last_position=0.0)
+        monitor.state.last_encoder = 100
+        fps.extruder = MagicMock(last_position=10.0)  # different object, but no window open
+
+        monitor._check_clog(100.0, encoder_delta=0, pressure=0.50)
+
+        # Falls through to the normal fresh-start path, same as any other tick.
+        assert monitor.state.clog_start_time == 100.0
+        assert monitor.state.clog_start_extruder_obj is fps.extruder
+
+    def test_confirms_clog_after_dwell_and_extrusion_window(self):
+        monitor, reactor, fps = _make_monitor()
+        fps.extruder = MagicMock(last_position=30.0)  # >= extrusion window (24mm)
+        monitor.state.last_lane_change_time = 0.0
+        monitor.state.clog_start_time = 80.0
+        monitor.state.clog_start_extruder = 0.0
+        monitor.state.clog_start_extruder_obj = fps.extruder  # same extruder throughout
         monitor.state.clog_start_encoder = 100
         monitor.state.last_encoder = 102  # within CLOG_ENCODER_SLACK of start
         monitor.clog_dwell = 5.0
-        fps.extruder = MagicMock(last_position=30.0)  # >= extrusion window (24mm)
 
         monitor._check_clog(100.0, encoder_delta=0, pressure=0.50)
 
@@ -1798,12 +1843,13 @@ class TestCheckClog:
 
     def test_encoder_progress_restarts_window_instead_of_firing(self):
         monitor, reactor, fps = _make_monitor()
+        fps.extruder = MagicMock(last_position=30.0)
         monitor.state.last_lane_change_time = 0.0
         monitor.state.clog_start_time = 80.0
         monitor.state.clog_start_extruder = 0.0
+        monitor.state.clog_start_extruder_obj = fps.extruder  # same extruder throughout
         monitor.state.clog_start_encoder = 0
         monitor.state.last_encoder = 100  # well beyond slack -> real movement
-        fps.extruder = MagicMock(last_position=30.0)
 
         monitor._check_clog(100.0, encoder_delta=0, pressure=0.50)
 
@@ -1824,14 +1870,15 @@ class TestCheckClog:
 
     def test_does_not_refire_when_already_active(self):
         monitor, reactor, fps = _make_monitor()
+        fps.extruder = MagicMock(last_position=30.0)
         monitor.state.last_lane_change_time = 0.0
         monitor.state.clog_start_time = 80.0
         monitor.state.clog_start_extruder = 0.0
+        monitor.state.clog_start_extruder_obj = fps.extruder  # same extruder throughout
         monitor.state.clog_start_encoder = 100
         monitor.state.last_encoder = 102
         monitor.state.clog_active = True  # already fired
         monitor.clog_dwell = 5.0
-        fps.extruder = MagicMock(last_position=30.0)
 
         monitor._check_clog(100.0, encoder_delta=0, pressure=0.50)
 
@@ -1849,13 +1896,14 @@ class TestCheckClog:
 
     def test_dwell_window_open_but_not_yet_confirmed(self):
         monitor, reactor, fps = _make_monitor()
+        fps.extruder = MagicMock(last_position=30.0)
         monitor.state.last_lane_change_time = 0.0
         monitor.state.clog_start_time = 99.0  # just started
         monitor.state.clog_start_extruder = 0.0
+        monitor.state.clog_start_extruder_obj = fps.extruder  # same extruder throughout
         monitor.state.clog_start_encoder = 100
         monitor.state.last_encoder = 102  # within slack, no restart
         monitor.clog_dwell = 5.0
-        fps.extruder = MagicMock(last_position=30.0)
 
         monitor._check_clog(100.0, encoder_delta=0, pressure=0.50)
 
@@ -1865,13 +1913,14 @@ class TestCheckClog:
 
     def test_no_callback_configured_is_safe(self):
         monitor, reactor, fps = _make_monitor(on_clog=None)
+        fps.extruder = MagicMock(last_position=30.0)
         monitor.state.last_lane_change_time = 0.0
         monitor.state.clog_start_time = 80.0
         monitor.state.clog_start_extruder = 0.0
+        monitor.state.clog_start_extruder_obj = fps.extruder  # same extruder throughout
         monitor.state.clog_start_encoder = 100
         monitor.state.last_encoder = 102
         monitor.clog_dwell = 5.0
-        fps.extruder = MagicMock(last_position=30.0)
 
         monitor._check_clog(100.0, encoder_delta=0, pressure=0.50)  # must not raise
 

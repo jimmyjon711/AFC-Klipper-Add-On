@@ -927,6 +927,7 @@ def _make_ext_for_tool_start(name="extruder"):
     tc_lane._load_state   = False
     tc_lane.prep_state    = False
     tc_lane._afc_prep_done = False
+    tc_lane.custom_load_cmd = None
     ext.tc_lane           = tc_lane
 
     return ext
@@ -1074,6 +1075,16 @@ class TestToolStartCallback_StateChanged_WithToolchanger:
                                 state=True, load_active=False)
         ext.tool_start_callback(100.0, True)
         ext.load_unload_sequence.assert_called_once_with(ext.tool_stn)
+
+    def test_load_sequence_skipped_when_lane_has_custom_load_cmd(self):
+        """A lane with a custom_load_cmd drives the whole load itself; the
+        built-in extruder-only move must be skipped even though load_active
+        is False, since custom_load_cmd is an independent gate."""
+        ext = self._make_tc_ext(printer_ready=True, prep_done=True,
+                                state=True, load_active=False)
+        ext.tc_lane.custom_load_cmd = "MY_CUSTOM_LOAD_MACRO"
+        ext.tool_start_callback(100.0, True)
+        ext.load_unload_sequence.assert_not_called()
 
     def test_load_sequence_not_called_when_load_already_active(self):
         ext = self._make_tc_ext(printer_ready=True, prep_done=True,

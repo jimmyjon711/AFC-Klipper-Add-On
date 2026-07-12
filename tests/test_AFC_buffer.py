@@ -2804,7 +2804,7 @@ class TestAFCFPSBufferInit:
         assert buf.fps_value == 0.0
         assert buf._homing_high_point == 0.7
         assert buf._last_logged_integral == 0.0
-        assert buf.integral_extrusion_threshold == 1
+        assert buf.integral_extrusion_threshold == 0.02
         assert buf._integral_last_extruder_pos is None
         assert buf._last_correction_direction == NEUTRAL_STATE_NAME
         assert buf.min_event_systime == buf.reactor.NEVER
@@ -3326,6 +3326,30 @@ class TestIsExtruding:
         buf._integral_last_extruder_pos = 10.0
         afc.function.get_extruder_pos = MagicMock(return_value=9.0)
         assert buf._is_extruding() is True
+
+    def test_debug_true_logs_diagnostic_line(self):
+        buf, afc, reactor, printer = _make_fps_buffer()
+        buf.debug = True
+        buf.logger = MagicMock()
+        buf.integral_extrusion_threshold = 0.5
+        buf._integral_last_extruder_pos = 10.0
+        afc.function.get_extruder_pos = MagicMock(return_value=10.5)
+        buf._is_extruding()
+        msg = buf.logger.debug.call_args[0][0]
+        assert "is_extruding" in msg
+        assert "pos=10.5000" in msg
+        assert "delta=0.5000" in msg
+        assert "threshold=0.5000" in msg
+        assert "result=True" in msg
+
+    def test_debug_false_skips_diagnostic_line(self):
+        buf, afc, reactor, printer = _make_fps_buffer()
+        buf.debug = False
+        buf.logger = MagicMock()
+        buf._integral_last_extruder_pos = 10.0
+        afc.function.get_extruder_pos = MagicMock(return_value=10.5)
+        buf._is_extruding()
+        buf.logger.debug.assert_not_called()
 
     def test_updates_last_extruder_pos_even_when_below_threshold(self):
         buf, afc, reactor, printer = _make_fps_buffer()

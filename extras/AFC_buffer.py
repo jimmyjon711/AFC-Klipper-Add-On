@@ -950,8 +950,10 @@ class AFCFPSBuffer(AFCBuffer):
 
         # Only integrate while filament is actually moving, so idle time
         # (paused, between prints) doesn't wind up the integral for no reason.
-        self.integral_extrusion_threshold: float = config.getfloat('integral_extrusion_threshold',
-                                                                   1, minval=0.0)
+        # Kept tiny so slow printing (first layers, fine detail) still counts --
+        # this should catch any real movement, not just fast movement.
+        self.integral_extrusion_threshold: float = config.getfloat(
+            'integral_extrusion_threshold', 0.02, minval=0.0)
         self._integral_last_extruder_pos: Optional[float] = None
         self._last_correction_direction: str = NEUTRAL_STATE_NAME
 
@@ -1380,7 +1382,7 @@ class AFCFPSBuffer(AFCBuffer):
     def _is_extruding(self) -> bool:
         """
         Checks if lanes extruder has actually moved in either direction.
-        
+
         :return boolean: Return True when the extruder has actually moved (either direction)
                          by more than integral_extrusion_threshold since the last correction
                          tick.
@@ -1398,7 +1400,14 @@ class AFCFPSBuffer(AFCBuffer):
         if previous is None:
             return False  # first sample this session -- no delta to compare yet
 
-        return abs(current_pos - previous) >= self.integral_extrusion_threshold
+        result = abs(current_pos - previous) >= self.integral_extrusion_threshold
+        if self.debug:
+            self.logger.debug(
+                "FPS_buffer {}: is_extruding pos={:.4f} delta={:.4f} threshold={:.4f} "
+                "result={}".format(
+                    self.name, current_pos, current_pos - previous,
+                    self.integral_extrusion_threshold, result))
+        return result
 
     def reset_multiplier(self):
         """
