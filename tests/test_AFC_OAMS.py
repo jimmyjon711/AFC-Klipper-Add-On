@@ -510,7 +510,7 @@ class TestHandleConnect:
             f"Failed to initialize OAMS load filament cancel command: not supported\n"
                     "Most likely the firmware needs to be updated to support this command."
         )
-        assert any(m in m for m in warning_msgs)
+        assert any(msg in m for m in warning_msgs)
         oams.clear_errors.assert_called_once()
 
     def test_general_failure_is_logged_not_raised(self):
