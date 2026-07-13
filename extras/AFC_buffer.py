@@ -17,13 +17,16 @@ import inspect
 
 from configparser import Error as error
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Callable, Union
 
 if TYPE_CHECKING:
     from extras.AFC import afc
     from extras.AFC_lane import AFCLane
     from extras.AFC_stepper import AFCExtruderStepper
     from gcode import GCodeCommand
+    from configfile import ConfigWrapper
+    from reactor import SelectReactor as Reactor, ReactorCompletion
+    from mcu import MCU, MCU_adc
 
 try: from extras.AFC_utils import add_filament_switch, VirtualFilamentSensor
 except: raise error("Error when trying to import AFC_utils.add_filament_switch\n{trace}".format(trace=traceback.format_exc()))
@@ -84,7 +87,8 @@ class AFCBuffer:
         self.show_macros = self.afc.show_macros
 
         # Try and get one of each pin to see how user has configured buffer
-        self.advance_pin        = config.get('advance_pin', None)
+        self.advance_pin: str   = None
+        self.trailing_pin: str  = None
         self.buffer_distance    = config.getfloat('distance', None)
         self.multiplier_high    = config.getfloat("multiplier_high", default=1.1, minval=1.0)
         self.multiplier_low     = config.getfloat("multiplier_low", default=0.9, minval=0.0, maxval=1.0)
@@ -96,7 +100,7 @@ class AFCBuffer:
             self.trailing_pin       = config.get('trailing_pin') # Trailing pin for buffer
 
             self.adv_filament_switch_name = "{}_{}".format(self.name, "expanded")
-            self.fila_avd, _ = add_filament_switch(self.adv_filament_switch_name, self.advance_pin,
+            self.fila_adv, _ = add_filament_switch(self.adv_filament_switch_name, self.advance_pin,
                                                    self.printer, show_sensor=self.enable_sensors_in_gui)
 
             self.trail_filament_switch_name = "{}_{}".format(self.name, "compressed")
@@ -711,7 +715,7 @@ class FPSEndstopWrapper:
     For trailing endstop: triggers when smoothed_fps <= low_point (buffer stretched)
     """
 
-    def __init__(self, fps_buffer, trigger_func):
+    def __init__(self, fps_buffer: AFCFPSBuffer, trigger_func: Callable[[], bool]) -> None:
         """
         Initialize the software endstop wrapper.
 
@@ -719,15 +723,15 @@ class FPSEndstopWrapper:
         :param trigger_func: Callable returning True when the FPS threshold for
                              this endstop is reached.
         """
-        self._fps_buffer = fps_buffer
-        self._reactor = fps_buffer.reactor
-        self._trigger_func = trigger_func
-        self._steppers = []
-        self._trigger_time = 0.
-        self._completion = None
-        self._poll_timer = None
+        self._fps_buffer: AFCFPSBuffer = fps_buffer
+        self._reactor: Reactor = fps_buffer.reactor
+        self._trigger_func: Callable[[], bool] = trigger_func
+        self._steppers: list = []
+        self._trigger_time: float = 0.
+        self._completion: Optional[ReactorCompletion] = None
+        self._poll_timer: Optional[object] = None
 
-    def get_mcu(self):
+    def get_mcu(self) -> MCU:
         """
         Return the MCU that owns the FPS ADC pin.
 
@@ -735,15 +739,17 @@ class FPSEndstopWrapper:
         """
         return self._fps_buffer.adc.get_mcu()
 
-    def add_stepper(self, stepper):
+    def add_stepper(self, stepper) -> None:
         """
         Register a stepper as homed by this endstop.
 
         :param stepper: Stepper object to associate with the endstop.
         """
+        if stepper in self._steppers:
+            return
         self._steppers.append(stepper)
 
-    def get_steppers(self):
+    def get_steppers(self) -> list:
         """
         Return the steppers registered on this endstop.
 
@@ -751,8 +757,8 @@ class FPSEndstopWrapper:
         """
         return list(self._steppers)
 
-    def home_start(self, print_time, sample_time, sample_count, rest_time,
-                   triggered=True):
+    def home_start(self, print_time: float, sample_time: float, sample_count: int,
+                   rest_time: float, triggered: bool = True) -> ReactorCompletion:
         """
         Begin a homing move, polling the FPS reading for the trigger condition.
 
@@ -779,7 +785,7 @@ class FPSEndstopWrapper:
                 self._poll_fps, self._reactor.NOW)
         return self._completion
 
-    def _poll_fps(self, eventtime):
+    def _poll_fps(self, eventtime: float) -> float:
         """
         Reactor timer callback that checks the FPS trigger condition.
 
@@ -793,7 +799,7 @@ class FPSEndstopWrapper:
             return self._reactor.NEVER
         return eventtime + FPS_ENDSTOP_POLL_TIME
 
-    def home_wait(self, home_end_time):
+    def home_wait(self, home_end_time: float) -> float:
         """
         Finish a homing move, stopping the poll timer.
 
@@ -805,7 +811,7 @@ class FPSEndstopWrapper:
             self._poll_timer = None
         return self._trigger_time
 
-    def query_endstop(self, print_time):
+    def query_endstop(self, print_time: float) -> int:
         """
         Report the instantaneous triggered state of the endstop.
 
@@ -839,7 +845,7 @@ class AFCFPSBuffer(AFCBuffer):
     set_point.
     """
 
-    def __init__(self, config):
+    def __init__(self, config: ConfigWrapper) -> None:
         """
         Initialize the FPS buffer from its config section.
 
@@ -852,13 +858,13 @@ class AFCFPSBuffer(AFCBuffer):
                        parameters, fault/LED options and GUI settings.
         """
         super().__init__(config)
-        self._advance_latched = False
-        self._latch_enabled = False  # Only latch during active loads
+        self._advance_latched: bool = False
+        self._latch_enabled: bool = False  # Only latch during active loads
 
         # ---- ADC / FPS sensor configuration ----
         self.ppins = self.printer.lookup_object('pins')
-        adc_pin = config.get('adc_pin')
-        self.adc = self.ppins.setup_pin('adc', adc_pin)
+        adc_pin: str = config.get('adc_pin')
+        self.adc: MCU_adc = self.ppins.setup_pin('adc', adc_pin)
 
         self.sample_count: int = config.getint('sample_count', 5)
         self.sample_time: float = config.getfloat('sample_time', 0.005)
@@ -958,32 +964,33 @@ class AFCFPSBuffer(AFCBuffer):
         self._last_correction_direction: str = NEUTRAL_STATE_NAME
 
         # ---- Fault detection ----
-        self.min_event_systime = self.reactor.NEVER
+        self.min_event_systime: float = self.reactor.NEVER
 
         # ---- Register virtual filament sensors for GUI display ----
         # Lets Mainsail show buffer state (grey = ramming) instead of red (no sensor).
-        self.adv_filament_switch_name = f"{self.name}_expanded"
-        self.fila_adv = VirtualFilamentSensor(self.printer, self.adv_filament_switch_name,
-                                              logger=self.logger,
-                                              show_in_gui=self.enable_sensors_in_gui)
-        self.trail_filament_switch_name = f"{self.name}_compressed"
-        self.fila_trail = VirtualFilamentSensor(self.printer, self.trail_filament_switch_name,
-                                                logger=self.logger,
-                                                show_in_gui=self.enable_sensors_in_gui)
+        self.adv_filament_switch_name: str = f"{self.name}_expanded"
+        self.fila_adv: VirtualFilamentSensor = VirtualFilamentSensor(
+            self.printer, self.adv_filament_switch_name,
+            logger=self.logger, show_in_gui=self.enable_sensors_in_gui)
+        self.trail_filament_switch_name: str = f"{self.name}_compressed"
+        self.fila_trail: VirtualFilamentSensor = VirtualFilamentSensor(
+            self.printer, self.trail_filament_switch_name,
+            logger=self.logger, show_in_gui=self.enable_sensors_in_gui)
 
         # ---- Correction timer ----
         self.correction_timer = self.reactor.register_timer(self._correction_event)
-        self._correction_running = False
+        self._correction_running: bool = False
 
         # Track the last applied multiplier for the active lane so we can
         # restore it on tool changes. Key: extruder name → (lane_name, multiplier)
-        self._last_multiplier = 1.0
-        self._saved_multipliers = {}
+        self._last_multiplier: float = 1.0
+        self._saved_multipliers: dict = {}
 
         # Software endstop wrappers so homing can use FPS thresholds like
         # turtleneck switches (advance triggers at high_point, trailing at low_point).
-        self.fps_endstop = FPSEndstopWrapper(self, lambda: self.buffer_triggered)
-        self.fps_trailing_endstop = FPSEndstopWrapper(
+        self.fps_endstop: FPSEndstopWrapper = FPSEndstopWrapper(
+            self, lambda: self.buffer_triggered)
+        self.fps_trailing_endstop: FPSEndstopWrapper = FPSEndstopWrapper(
             self, lambda: self.buffer_trailing_triggered)
 
         # Register macros
@@ -991,7 +998,7 @@ class AFCFPSBuffer(AFCBuffer):
                                         self.cmd_AFC_SET_FPS_SET_POINT,
                                         desc=self.cmd_AFC_SET_FPS_SET_POINT_help)
 
-    def _check_deadband(self, set_point: float, deadband: float)-> str:
+    def _check_deadband(self, set_point: float, deadband: float) -> str:
         """
         Helper method for checking deadband to verify that its not greater/lower than high/low
         set points.
@@ -1045,7 +1052,8 @@ class AFCFPSBuffer(AFCBuffer):
     # ------------------------------------------------------------------
     # ADC callback — runs at report_time intervals
     # ------------------------------------------------------------------
-    def _adc_callback(self, read_time, read_value=None):
+    def _adc_callback(self, read_time: Union[float, list],
+                      read_value: Optional[float] = None) -> None:
         """
         Process ADC reading from FPS sensor.
         """
@@ -1070,7 +1078,7 @@ class AFCFPSBuffer(AFCBuffer):
 
         # Keep last_state/advance/trailing current even when the correction
         # loop isn't running, so load/calibration can still detect filament arrival.
-        has_stepper = self._lane_has_rotation_control(self.current_lane)
+        has_stepper: bool = self._lane_has_rotation_control(self.current_lane)
 
         # If buffer was enabled before lane stepper wiring was ready,
         # lazily start correction once the lane exposes rotation control.
@@ -1080,9 +1088,8 @@ class AFCFPSBuffer(AFCBuffer):
             self._correction_running = True
         if not has_stepper:
             half_db = self.deadband / 2.0
-            # elif self.smoothed_fps > self.set_point + half_db:
-            if self.smoothed_fps < self.set_point - half_db:
-                self.last_state = ADVANCING_STATE_NAME
+            if self.smoothed_fps > self.set_point + half_db:
+                self.last_state = TRAILING_STATE_NAME
                 self.advance_state = True
                 if self._latch_enabled:
                     self._advance_latched = True
@@ -1091,9 +1098,8 @@ class AFCFPSBuffer(AFCBuffer):
                 # Latched during load: keep advance_state True even if
                 # pressure drops briefly between motor pulses.
                 self.advance_state = True
-            elif self.smoothed_fps > self.set_point + half_db:
-            # elif self.smoothed_fps < self.set_point - half_db:
-                self.last_state = TRAILING_STATE_NAME
+            elif self.smoothed_fps < self.set_point - half_db:
+                self.last_state = ADVANCING_STATE_NAME
                 self.advance_state = False
                 self.trailing_state = True
             else:
@@ -1106,7 +1112,7 @@ class AFCFPSBuffer(AFCBuffer):
     # ------------------------------------------------------------------
     # Correction timer — proportional adjustment loop
     # ------------------------------------------------------------------
-    def _update_virtual_sensors(self, eventtime):
+    def _update_virtual_sensors(self, eventtime: float) -> None:
         """
         Push buffer state into virtual filament sensors for GUI display.
 
@@ -1134,7 +1140,7 @@ class AFCFPSBuffer(AFCBuffer):
         except Exception:
             pass
 
-    def _correction_event(self, eventtime):
+    def _correction_event(self, eventtime: float) -> float:
         """
         Periodically adjust rotation distance based on FPS reading.
 
@@ -1206,8 +1212,8 @@ class AFCFPSBuffer(AFCBuffer):
             if self.last_state != ADVANCING_STATE_NAME:
                 log_event = True
             self.last_state = ADVANCING_STATE_NAME
-            self.advance_state = True
-            self.trailing_state = False
+            self.advance_state = False
+            self.trailing_state = True
 
             self._last_correction_direction = ADVANCING_STATE_NAME
             if self.led:
@@ -1216,8 +1222,8 @@ class AFCFPSBuffer(AFCBuffer):
             if self.last_state != TRAILING_STATE_NAME:
                 log_event = True
             self.last_state = TRAILING_STATE_NAME
-            self.advance_state = False
-            self.trailing_state = True
+            self.advance_state = True
+            self.trailing_state = False
             self._last_correction_direction = TRAILING_STATE_NAME
             if self.led:
                 self.afc.function.afc_led(self.led_trailing, self.led_index)
@@ -1255,7 +1261,7 @@ class AFCFPSBuffer(AFCBuffer):
     # ------------------------------------------------------------------
     # Buffer enable / disable  (interface expected by AFCLane)
     # ------------------------------------------------------------------
-    def enable_advance_latch(self):
+    def enable_advance_latch(self) -> None:
         """
         Enable latching so advance_state stays True once triggered.
 
@@ -1265,14 +1271,14 @@ class AFCFPSBuffer(AFCBuffer):
         self._latch_enabled = True
         self._advance_latched = False
 
-    def clear_advance_latch(self):
+    def clear_advance_latch(self) -> None:
         """
         Disable latching and reset advance_state to real-time pressure.
         """
         self._latch_enabled = False
         self._advance_latched = False
 
-    def enable_buffer(self, lane):
+    def enable_buffer(self, lane: AFCLane) -> None:
         """
         Enable the FPS buffer for the given lane.
 
@@ -1323,7 +1329,7 @@ class AFCFPSBuffer(AFCBuffer):
         self.logger.debug((f"{self.name} FPS buffer enabled for {self.current_lane.name} "
                            f"(correction={'active' if has_stepper else 'off/adc-only'})"))
 
-    def disable_buffer(self):
+    def disable_buffer(self) -> None:
         """
         Disable the FPS buffer, reset multiplier, stop timers.
         """
@@ -1368,7 +1374,7 @@ class AFCFPSBuffer(AFCBuffer):
     # ------------------------------------------------------------------
     # Multiplier control  (same interface as AFCBuffer)
     # ------------------------------------------------------------------
-    def set_multiplier(self, multiplier):
+    def set_multiplier(self, multiplier: float) -> None:
         """
         Apply rotation distance multiplier to current lane's stepper.
         """
@@ -1409,7 +1415,7 @@ class AFCFPSBuffer(AFCBuffer):
                     self.integral_extrusion_threshold, result))
         return result
 
-    def reset_multiplier(self):
+    def reset_multiplier(self) -> None:
         """
         Reset rotation distance back to base value.
         """
@@ -1420,7 +1426,7 @@ class AFCFPSBuffer(AFCBuffer):
         self.current_lane.update_rotation_distance(1)
         self.logger.debug("FPS buffer multiplier reset for {}".format(self.current_lane.name))
 
-    def _lane_has_rotation_control(self, lane) -> bool:
+    def _lane_has_rotation_control(self, lane: Optional[AFCLane]=None) -> bool:
         """
         Return True when lane supports AFC stepper rotation adjustments.
         """
@@ -1432,7 +1438,7 @@ class AFCFPSBuffer(AFCBuffer):
         has_stepper = (drive_stepper is not None) or (extruder_stepper is not None)
         return has_stepper and callable(update_fn)
 
-    def extruder_pos_update_event(self, eventtime):
+    def extruder_pos_update_event(self, eventtime: float) -> float:
         """
         Reactor timer callback that watches for filament feed faults.
 
@@ -1477,7 +1483,7 @@ class AFCFPSBuffer(AFCBuffer):
     # ------------------------------------------------------------------
     cmd_QUERY_BUFFER_help = "Report FPS buffer sensor state"
     cmd_QUERY_BUFFER_options = {"BUFFER": {"type": "string", "default": ""}}
-    def cmd_QUERY_BUFFER(self, gcmd):
+    def cmd_QUERY_BUFFER(self, gcmd: GCodeCommand) -> None:
         """
         Reports the current state of the FPS buffer sensor including the
         current FPS reading, smoothed value, and rotation distance.
@@ -1518,7 +1524,7 @@ class AFCFPSBuffer(AFCBuffer):
         self.logger.info("{} : {}".format(self.name, state_info))
 
     cmd_AFC_SET_FPS_SET_POINT_help = "Live adjust FPS buffer set point target"
-    def cmd_AFC_SET_FPS_SET_POINT(self, gcmd):
+    def cmd_AFC_SET_FPS_SET_POINT(self, gcmd: GCodeCommand) -> None:
         """
         Adjust the FPS target set point and deadband while running.
 
@@ -1550,7 +1556,7 @@ class AFCFPSBuffer(AFCBuffer):
             self.set_point - half_db, self.set_point + half_db
         ))
 
-    def get_status(self, eventtime=None):
+    def get_status(self, eventtime: Optional[float] = None) -> dict:
         """
         Return a status dict describing the buffer for the GUI/API.
 

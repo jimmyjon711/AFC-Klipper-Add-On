@@ -33,6 +33,8 @@ if TYPE_CHECKING:
     from configfile import ConfigWrapper
     from extras.filament_switch_sensor import SwitchSensor
     from klippy import Printer
+    from reactor import SelectReactor as Reactor
+    from gcode import GCodeCommand
 
 ERROR_STR = "Error trying to import {import_lib}, please rerun install-afc.sh script in your AFC-Klipper-Add-On directory then restart klipper\n\n{trace}"
 
@@ -191,7 +193,8 @@ class DebounceButton:
 class VirtualRunoutHelper:
     """Minimal runout helper used by FPS_PFS virtual sensors."""
 
-    def __init__(self, printer, name, runout_cb=None, enable_runout=False):
+    def __init__(self, printer: Printer, name: str, runout_cb: Optional[Callable] = None,
+                 enable_runout: bool = False) -> None:
         """
         Initialize the minimal runout helper.
 
@@ -200,18 +203,19 @@ class VirtualRunoutHelper:
         :param runout_cb: Optional callable invoked on a runout transition.
         :param enable_runout: Whether runout callbacks are enabled.
         """
-        self.printer = printer
-        self._reactor = printer.get_reactor()
-        self.name = name
-        self.runout_callback = runout_cb
-        self.sensor_enabled = bool(enable_runout)
-        self.filament_present = False
-        self.insert_gcode = None
-        self.runout_gcode = None
-        self.event_delay = 0.0
-        self.min_event_systime = self._reactor.NEVER
+        self.printer: Printer = printer
+        self._reactor: Reactor = printer.get_reactor()
+        self.name: str = name
+        self.runout_callback: Optional[Callable] = runout_cb
+        self.sensor_enabled: bool = bool(enable_runout)
+        self.filament_present: bool = False
+        self.insert_gcode: Optional[str] = None
+        self.runout_gcode: Optional[str] = None
+        self.event_delay: float = 0.0
+        self.min_event_systime: float = self._reactor.NEVER
 
-    def note_filament_present(self, eventtime=None, is_filament_present=False, **_kwargs):
+    def note_filament_present(self, eventtime: Optional[float] = None,
+                              is_filament_present: bool = False, **_kwargs) -> None:
         """
         Update the tracked filament-present state and fire runout if needed.
 
@@ -225,7 +229,7 @@ class VirtualRunoutHelper:
         if eventtime is None:
             eventtime = self._reactor.monotonic()
 
-        new_state = bool(is_filament_present)
+        new_state: bool = bool(is_filament_present)
         if new_state == self.filament_present:
             return
 
@@ -237,7 +241,7 @@ class VirtualRunoutHelper:
             except TypeError:
                 self.runout_callback(eventtime=eventtime)
 
-    def get_status(self, _eventtime=None):
+    def get_status(self, _eventtime: Optional[float] = None) -> dict:
         """
         Return the sensor status.
 
@@ -255,7 +259,9 @@ class VirtualFilamentSensor:
     QUERY_HELP = "Query the status of the Filament Sensor"
     SET_HELP = "Sets the filament sensor on/off"
 
-    def __init__(self, printer, name, logger: AFC_logger, show_in_gui=True, runout_cb=None, enable_runout=False):
+    def __init__(self, printer: Printer, name: str, logger: AFC_logger,
+                show_in_gui: bool = True, runout_cb: Optional[Callable] = None,
+                enable_runout: bool = False) -> None:
         """
         Register a lightweight virtual filament sensor.
 
@@ -269,17 +275,18 @@ class VirtualFilamentSensor:
         :param runout_cb: Optional runout callback passed to the runout helper.
         :param enable_runout: Whether runout callbacks are enabled.
         """
-        self.printer = printer
-        self.name = name
-        self.logger = logger
-        self._object_name = f"filament_switch_sensor {name}"
-        self.runout_helper = VirtualRunoutHelper(printer, name, runout_cb=runout_cb, enable_runout=enable_runout)
+        self.printer: Printer = printer
+        self.name: str = name
+        self.logger: AFC_logger = logger
+        self._object_name: str = f"filament_switch_sensor {name}"
+        self.runout_helper: VirtualRunoutHelper = VirtualRunoutHelper(
+            printer, name, runout_cb=runout_cb, enable_runout=enable_runout)
 
         try:
             printer.add_object(self._object_name, self)
             if not show_in_gui:
                 # Hide from GUI by prefixing with underscore
-                objects = getattr(printer, "objects", {})
+                objects: dict = getattr(printer, "objects", {})
                 if self._object_name in objects:
                     objects["_" + self._object_name] = objects.pop(self._object_name)
         except Exception:
@@ -292,15 +299,17 @@ class VirtualFilamentSensor:
         if gcode is None:
             return
         try:
-            gcode.register_mux_command("QUERY_FILAMENT_SENSOR", "SENSOR", name, self.cmd_QUERY_FILAMENT_SENSOR, desc=self.QUERY_HELP)
+            gcode.register_mux_command("QUERY_FILAMENT_SENSOR", "SENSOR", name,
+                                       self.cmd_QUERY_FILAMENT_SENSOR, desc=self.QUERY_HELP)
         except Exception:
             pass
         try:
-            gcode.register_mux_command("SET_FILAMENT_SENSOR", "SENSOR", name, self.cmd_SET_FILAMENT_SENSOR, desc=self.SET_HELP)
+            gcode.register_mux_command("SET_FILAMENT_SENSOR", "SENSOR", name,
+                                       self.cmd_SET_FILAMENT_SENSOR, desc=self.SET_HELP)
         except Exception:
             pass
 
-    def get_status(self, eventtime):
+    def get_status(self, eventtime: Optional[float]) -> dict:
         """
         Return the sensor status from the runout helper.
 
@@ -309,11 +318,11 @@ class VirtualFilamentSensor:
         """
         return self.runout_helper.get_status(eventtime)
 
-    def cmd_QUERY_FILAMENT_SENSOR(self, gcmd):
+    def cmd_QUERY_FILAMENT_SENSOR(self, gcmd: GCodeCommand) -> None:
         """
         G-code handler that reports whether filament is detected.
 
-        Usage: ``QUERY_FILAMENT_SENSOR SENSOR=<name>``
+        Usage: `QUERY_FILAMENT_SENSOR SENSOR=<name>`
 
         :param gcmd: The parsed G-code command.
         """
@@ -322,13 +331,13 @@ class VirtualFilamentSensor:
             msg = f"Filament Sensor {self.name}: filament detected"
         else:
             msg = f"Filament Sensor {self.name}: filament not detected"
-        self.logger.info(msg)
+        gcmd.respond_info(msg)
 
-    def cmd_SET_FILAMENT_SENSOR(self, gcmd):
+    def cmd_SET_FILAMENT_SENSOR(self, gcmd: GCodeCommand) -> None:
         """
         G-code handler that enables or disables the virtual sensor.
 
-        Usage: ``SET_FILAMENT_SENSOR SENSOR=<name> ENABLE=<0|1>``
+        Usage: `SET_FILAMENT_SENSOR SENSOR=<name> ENABLE=<0|1>`
 
         :param gcmd: The parsed G-code command.
         """
