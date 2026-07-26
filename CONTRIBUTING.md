@@ -13,6 +13,9 @@ Thanks for your interest in contributing! Whether it's a bug report, new feature
 
 ## Guidelines
 
+### Using AI
+- Please read over [AI usage policy](AI_USAGE_POLICY.md)
+
 ### Code Style
 
 - Python code should follow [PEP 8](https://peps.python.org/pep-0008/) as closely as possible.
@@ -247,7 +250,7 @@ Each `tests/klippy/*.test` file describes one test scenario:
 ```
 DICTIONARY stm32h723.dict   # MCU dict to simulate against
 CONFIG     afc_base.cfg     # Klipper config file (relative to the .test file)
-AFC_STATUS                  # GCode lines to execute
+AFC_CLEAR_MESSAGE           # GCode lines to execute
 ```
 
 The `conftest.py` in `tests/` automatically symlinks AFC's `extras/` modules

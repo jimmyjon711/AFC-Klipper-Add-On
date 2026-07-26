@@ -243,9 +243,19 @@ class TestHandleRunout:
 class TestHandleConnect:
     def test_physical_hub_handle_connect_does_not_raise(self):
         hub = _make_hub(switch_pin="PA0")
-        # physical pin — no lane validation needed
-        hub.handle_connect()  # should not raise
+        hub.handle_connect()
         assert hub.gcode is hub.afc.gcode
+        assert hub.reactor is hub.afc.reactor
+
+    def test_handle_connect_sends_register_macros_event(self):
+        hub = _make_hub(switch_pin="PA0")
+        hub.printer.send_event = MagicMock(wraps=hub.printer.send_event)
+        hub.handle_connect()
+        hub.printer.send_event.assert_called_once_with("afc_hub:register_macros", hub)
+
+# ── handle_ready ────────────────────────────────────────────────────────────
+
+class TestHandleReady:
 
     def test_virtual_hub_raises_when_lanes_have_no_load_sensor(self):
         from configparser import Error as config_error
@@ -255,7 +265,7 @@ class TestHandleConnect:
         lane.load = None  # no load sensor
         hub.lanes = {"lane1": lane}
         with pytest.raises(config_error):
-            hub.handle_connect()
+            hub.handle_ready()
 
     def test_virtual_hub_no_error_when_all_lanes_have_load_sensor(self):
         hub = _make_hub(switch_pin="virtual")
@@ -263,16 +273,56 @@ class TestHandleConnect:
         lane.fullname = "AFC_stepper lane1"
         lane.load = MagicMock()  # has load sensor
         hub.lanes = {"lane1": lane}
-        hub.handle_connect()  # should not raise
+        hub.handle_ready()  # should not raise
 
-    def test_handle_connect_sends_register_macros_event(self):
-        hub = _make_hub(switch_pin="PA0")
-        hub.handle_connect()
-        # Verify the event was dispatched (MockPrinter records handlers)
-        # send_event on MockPrinter calls registered handlers — no assert needed
-        # if we got here without error, the event path ran
-        assert True
+    def test_physical_hub_handle_ready_skips_lane_check_entirely(self):
+        # A physical hub (switch_pin != "virtual") must never evaluate the
+        # per-lane load-sensor check. Prove it by giving a lane that WOULD
+        # raise if the virtual-hub body ran (load is None, prep is not None,
+        # and unit_obj.type is not a sensorless unit).
+        from tests.conftest import MockConfig, MockPrinter, MockAFC
+        afc = MockAFC()
+        printer = MockPrinter(afc=afc)
+        config = MockConfig(
+            name="AFC_hub phys_hub", printer=printer,
+            values={"switch_pin": "PA0"}
+        )
+        with patch("extras.AFC_hub.add_filament_switch") as mock_afs:
+            mock_afs.return_value = (MagicMock(), MagicMock())
+            hub = afc_hub(config)
+        lane = MagicMock()
+        lane.fullname = "AFC_stepper lane1"
+        lane.load = None
+        lane.prep = MagicMock()
+        lane.unit_obj.type = "BoxTurtle"
+        hub.lanes = {"lane1": lane}
+        hub.handle_ready()  # should not raise, is_virtual_pin() is False
 
+    def test_virtual_hub_skips_sensorless_unit_lanes(self):
+        # A lane whose unit type is in SENSORLESS_UNITS (e.g. OpenAMS) is
+        # skipped via `continue` even though it has no load sensor, so no
+        # error should be raised.
+        hub = _make_hub(switch_pin="virtual")
+        lane = MagicMock()
+        lane.fullname = "AFC_stepper lane1"
+        lane.load = None
+        lane.prep = MagicMock()
+        lane.unit_obj.type = "OpenAMS"
+        hub.lanes = {"lane1": lane}
+        hub.handle_ready()  # should not raise, lane is skipped via continue
+
+    def test_virtual_hub_no_error_when_prep_is_none(self):
+        # Condition is `lane.load is None and lane.prep is not None`. With
+        # load missing but prep also None, the second operand alone must be
+        # enough to prevent the report, independent of the first.
+        hub = _make_hub(switch_pin="virtual")
+        lane = MagicMock()
+        lane.fullname = "AFC_stepper lane1"
+        lane.load = None
+        lane.prep = None
+        lane.unit_obj.type = "BoxTurtle"
+        hub.lanes = {"lane1": lane}
+        hub.handle_ready()  # should not raise
 
 # ── afc_hub.__init__ ──────────────────────────────────────────────────────────
 
@@ -350,8 +400,9 @@ class TestHubCut:
         cur_lane = MagicMock()
         # Sequence: loop1 enter(F), loop1 exit(T), loop2 enter(T), loop2 exit(F),
         #           loop3 enter(F), loop3 exit(T)
-        type(hub).state = PropertyMock(side_effect=[False, True, True, False, False, True])
-        hub.hub_cut(cur_lane)
+        with patch.object(type(hub), "state", new_callable=PropertyMock) as mock_prop:
+            mock_prop.side_effect=[False, True, True, False, False, True]
+            hub.hub_cut(cur_lane)
         # Should call run_script_from_command for prep, clip, and pass angles
         calls = hub.gcode.run_script_from_command.call_args_list
         assert len(calls) >= 3  # prep + clip + pass
@@ -361,8 +412,9 @@ class TestHubCut:
         hub = _make_hub(switch_pin="PA0")
         hub.cut_confirm = False
         cur_lane = MagicMock()
-        type(hub).state = PropertyMock(side_effect=[False, True, True, False, False, True])
-        hub.hub_cut(cur_lane)
+        with patch.object(type(hub), "state", new_callable=PropertyMock) as mock_prop:
+            mock_prop.side_effect=[False, True, True, False, False, True]
+            hub.hub_cut(cur_lane)
         calls = [c[0][0] for c in hub.gcode.run_script_from_command.call_args_list]
         assert any(str(hub.cut_servo_prep_angle) in c for c in calls)
         assert any(str(hub.cut_servo_clip_angle) in c for c in calls)
@@ -373,8 +425,9 @@ class TestHubCut:
         hub = _make_hub(switch_pin="PA0")
         hub.cut_confirm = True
         cur_lane = MagicMock()
-        type(hub).state = PropertyMock(side_effect=[False, True, True, False, False, True])
-        hub.hub_cut(cur_lane)
+        with patch.object(type(hub), "state", new_callable=PropertyMock) as mock_prop:
+            mock_prop.side_effect=[False, True, True, False, False, True]
+            hub.hub_cut(cur_lane)
         # With confirm: prep + clip + prep + clip + pass = 5 calls
         calls = hub.gcode.run_script_from_command.call_args_list
         assert len(calls) >= 5
@@ -384,8 +437,9 @@ class TestHubCut:
         hub = _make_hub(switch_pin="PA0")
         hub.cut_confirm = False
         cur_lane = MagicMock()
-        type(hub).state = PropertyMock(side_effect=[False, True, True, False, False, True])
-        hub.hub_cut(cur_lane)
+        with patch.object(type(hub), "state", new_callable=PropertyMock) as mock_prop:
+            mock_prop.side_effect=[False, True, True, False, False, True]
+            hub.hub_cut(cur_lane)
         # Last move should be negative (retract by cut_clear)
         all_move_calls = cur_lane.move.call_args_list
         last_call_dist = all_move_calls[-1][0][0]
