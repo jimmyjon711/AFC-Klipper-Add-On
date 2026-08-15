@@ -108,6 +108,7 @@ class afc:
         self._last_td1_query:float    = 0
         self.lane_data_enabled  = False
         self.prep_done          = False         # Variable used to hold of save_vars function from saving too early and overriding save before prep can be ran
+        self.last_prep_activity_time = 0.0  # eventtime of the last PREP edge on any lane
         self.in_print_timer     = None
         self.activate_cb_done = True
         self.db_backup          = False
