@@ -12,8 +12,9 @@ from contextlib import contextmanager
 from configfile import error
 from datetime import datetime
 from enum import Enum
+from gcode import CommandError
 
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, Union, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from configfile import ConfigWrapper
@@ -26,7 +27,7 @@ if TYPE_CHECKING:
     from pins import PrinterPins
     from query_endstops import QueryEndstops
 
-try: from extras.AFC_utils import ERROR_STR, add_filament_switch
+try: from extras.AFC_utils import ERROR_STR, add_filament_switch, natural_sort_key
 except: raise error("Error when trying to import AFC_utils.ERROR_STR, add_filament_switch\n{trace}".format(trace=traceback.format_exc()))
 
 try: from extras import AFC_assist
@@ -117,24 +118,24 @@ class AFCLane:
 
         #stored status variables
         self.fullname: str      = config.get_name()
-        self.name               = self.fullname.split()[-1]
+        self.name: str          = self.fullname.split()[-1]
 
         # TODO: Put these variables into a common class or something so they are easier to clear out
         # when lanes are unloaded
         self.tool_loaded        = False
         self.loaded_to_hub      = False
-        self.spool_id           = None
+        self.spool_id: Optional[Union[int, str]] = None
         self.color: str         = ""
         self.multi_color: list  = []
         self.spool_vendor: str  = ""
         self.filament_name: str = ""
         self.weight: float      = 0.
-        self.auto_switch_triggered = False
+        self.auto_switch_triggered: bool = False
         self._material: str     = None
-        self.extruder_temp      = None
-        self.bed_temp           = None
+        self.extruder_temp: Optional[int] = None
+        self.bed_temp: Optional[int] = None
         self.td1_data           = {}
-        self.runout_lane        = None
+        self.runout_lane: Optional[str] = None
         self.status             = AFCLaneState.NONE
         self.need_purge         = False
         self._afc_staged_spool_id: Optional[int] = None
@@ -148,7 +149,7 @@ class AFCLane:
         self.hub: Optional[str] = config.get('hub',None)                                # Hub name(AFC_hub) that belongs to this stepper, overrides hub that is set in unit(AFC_BoxTurtle/NightOwl/etc) section.
         # Overrides buffers set at the unit and extruder level
         self.buffer_name: Optional[str] = config.get("buffer", None)                            # Buffer name(AFC_buffer) that belongs to this stepper, overrides buffer that is set in extruder(AFC_extruder) or unit(AFC_BoxTurtle/NightOwl/etc) sections.
-        self.unit               = unit.split(':')[0]
+        self.unit: str           = unit.split(':')[0]
         try:
             self.index              = int(unit.split(':')[1])
         except:
@@ -158,16 +159,23 @@ class AFCLane:
         self.afc_extruder_name    = config.get('extruder', None)                          # Extruder name(AFC_extruder) that belongs to this stepper, overrides extruder that is set in unit(AFC_BoxTurtle/NightOwl/etc) section.
         self.standalone_lane      = config.getboolean("standalone", False)
         self.remember_spool :bool = config.getboolean('remember_spool', None)             # remember_spool that is set in AFC_Stepper section, overrides remember_spool that is set in unit(AFC_BoxTurtle/NightOwl/etc) section.
-        self.map                = config.get('cmd', None)                               # Keeping this in so it does not break others config that may have used this, use map instead
+        self.map: list            = config.getlist('cmd', [])                           # Keeping this in so it does not break others config that may have used this, use map instead
         # Saving to self._map so that if a user has it defined it will be reset back to this when
-        # the calling RESET_AFC_MAPPING macro.
+        # AFC_RESET_MAPPING macro is called.
+        self.map = config.getlist('map', self.map)
+        self._map: list           = list(self.map)
+        # Holds which T(n) macro is currently mapped to this lane since map can be a list of T(n) now
+        self.current_map: str     = ""
+        # Keeps track of which T(n) macros have been pushed up to moonrakers lane_data database
+        # endpoint. That way send_lane_data method and clear out mappings that were removed since
+        # last updated.
+        self._sent_lane_data_keys: list = []
 
         # LED SETTINGS
         # All variables use: (R,G,B,W) 0 = off, 1 = full brightness. Setting value here overrides values set in unit(AFC_BoxTurtle/NightOwl/etc) section
-        self._map = self.map      = config.get('map', self.map)
-        self.led_index            = config.get('led_index', None)                       # LED index of lane in chain of lane LEDs
-        self.led_fault            = config.get('led_fault',None)                        # LED color to set when faults occur in lane
-        self.led_ready            = config.get('led_ready',None)                        # LED color to set when lane is ready
+        self.led_index: str       = config.get('led_index', None)                       # LED index of lane in chain of lane LEDs
+        self.led_fault: str       = config.get('led_fault',None)                        # LED color to set when faults occur in lane
+        self.led_ready: str       = config.get('led_ready',None)                        # LED color to set when lane is ready
         self.led_not_ready        = config.get('led_not_ready',None)                    # LED color to set when lane not ready
         self.led_loading          = config.get('led_loading',None)                      # LED color to set when lane is loading
         self.led_prep_loaded      = config.get('led_loading',None)                      # LED color to set when lane is loaded
@@ -235,7 +243,7 @@ class AFCLane:
 
         self.selector: str = config.get("selector", None)
 
-        self.espooler = AFC_assist.Espooler(self.name, config)
+        self.espooler: AFC_assist.Espooler = AFC_assist.Espooler(self.name, config)
         self.lane_load_count = None
 
         self.filament_diameter: float  = config.getfloat("filament_diameter", 1.75)    # Diameter of filament being used
@@ -346,6 +354,34 @@ class AFCLane:
     def __str__(self):
         return self.name
 
+    def _format_map(self, mapping: list, empty: str) -> str:
+        """
+        Helper method to return a mapping list as a string, naturally sorted low to high
+
+        :param mapping: Mapping list to format
+        :param empty: Value to return when mapping is empty
+        :return str: Formatted mapping list
+        """
+        if not mapping:
+            return empty
+        return ", ".join(sorted(mapping, key=natural_sort_key))
+
+    def map_to_string(self) -> str:
+        """
+        Helper method to return map list as a string, naturally sorted low to high
+
+        :return str: Returns lanes map list as a string
+        """
+        return self._format_map(self.map, "NONE")
+
+    def _map_to_string(self) -> str:
+        """
+        Helper method to return _map list as a string, naturally sorted low to high
+
+        :return str: Returns lanes _map list as a string
+        """
+        return self._format_map(self._map, "NONE")
+
     @property
     def load_es(self) -> str:
         """
@@ -431,10 +467,10 @@ class AFCLane:
 
         :returns str: Returns lane mapping index as string
         """
-        if self.map is None:
+        if self.current_map is None:
             return ""
 
-        return self.map.replace("T", "")
+        return self.current_map.replace("T", "")
 
     @property
     def lane_extruder_index(self) -> int:
@@ -1022,8 +1058,17 @@ class AFCLane:
 
         # Only continue if a error did not happen
         if not self.afc.error_state:
-            # Change Mapping
-            self.gcode.run_script_from_command('SET_MAP LANE={} MAP={}'.format(change_lane.name, empty_lane.map))
+            try:
+                # Swap mapping with runout lane
+                self.gcode.run_script_from_command(
+                    f'AFC_SWAP_MAPPING FROM={empty_lane.name} TO={change_lane.name}'
+                )
+            except CommandError:
+                self.afc.error.AFC_error(
+                    f"Error when trying swap mapping from {empty_lane.name} to {change_lane.name}",
+                    pause=True
+                )
+                return
 
             # Turn off runout extruder LEDs and turn on other extruder LEDs if extruders are
             # different
@@ -1810,19 +1855,48 @@ class AFCLane:
             self.extruder_obj.tc_unit_obj.tool_swap(self, set_start_time=False)
 
 
+    def _mapped_keys(self) -> list:
+        """
+        Returns the real T(n) mappings currently assigned to this lane, with
+        the "NONE" placeholder filtered out.
+
+        :return list: T(n) command strings currently mapped to this lane
+        """
+        return [m for m in self.map if m != "NONE"]
+
     def send_lane_data(self):
         """
-        Sends lane data to moonrakers `machine/set_lane_data` endpoint
-        """
-        if (self.afc.moonraker
-            and self.map is not None
-            and "T" in self.map):
-            scan_time = self.td1_data['scan_time'] if 'scan_time' in self.td1_data else ""
-            td        = self.td1_data['td']        if 'td'        in self.td1_data else ""
+        Sends lane data to moonrakers `machine/set_lane_data` endpoint, one record
+        per T(n) currently mapped to this lane -- so a lane mapped to multiple T(n)
+        macros shows up correctly in every mapped slot, not just current_map's.
 
+        Also removes records for any T(n) this lane sent data for last time but no
+        longer maps to, skipping ones that got reassigned to a different lane --
+        that lane's own send_lane_data() call is responsible for posting its record.
+        """
+        if not self.afc.moonraker:
+            return
+
+        current_keys = self._mapped_keys()
+
+        for key in self._sent_lane_data_keys:
+            if key in current_keys:
+                continue
+            # Only remove if no lane (including this one) claims this T(n)
+            # anymore -- if it got reassigned to another lane, that lane's
+            # own map already carries it, so leave its record alone; that
+            # lane's own send_lane_data() call is responsible for it.
+            still_claimed = any(key in lane.map for lane in self.afc.lanes.values())
+            if not still_claimed:
+                self.afc.moonraker.remove_database_entry("lane_data", key)
+
+        scan_time = self.td1_data['scan_time'] if 'scan_time' in self.td1_data else ""
+        td        = self.td1_data['td']        if 'td'        in self.td1_data else ""
+
+        for key in current_keys:
             lane_data = {
                 "namespace": "lane_data",
-                "key": self.name,
+                "key": key,
                 "value": {
                     "color"          : self.color,
                     "material"       : self.material,
@@ -1830,7 +1904,7 @@ class AFCLane:
                     "nozzle_temp"    : self.extruder_temp,
                     "scan_time"      : scan_time,
                     "td"             : td,
-                    "lane"           : self.lane_index,
+                    "lane"           : key.replace("T", ""),
                     "extruder_index" : self.lane_extruder_index,
                     "spool_id"       : self.spool_id,
                     "weight"         : self.weight
@@ -1838,16 +1912,24 @@ class AFCLane:
             }
             self.afc.moonraker.send_lane_data(lane_data)
 
+        self._sent_lane_data_keys = current_keys
+
     def clear_lane_data(self):
         """
-        Clears lane data that is currently stored at moonrakers `machine/set_lane_data` endpoint
+        Clears lane data that is currently stored at moonrakers `machine/set_lane_data`
+        endpoint for every T(n) currently mapped to this lane, without touching the
+        mapping itself -- used when spool contents are cleared but the lane keeps
+        its T(n) mapping(s), e.g. on unload.
         """
-        if (self.afc.moonraker
-            and self.map is not None
-            and "T" in self.map):
+        if not self.afc.moonraker:
+            return
+
+        current_keys = self._mapped_keys()
+
+        for key in current_keys:
             lane_data = {
                 "namespace": "lane_data",
-                "key": self.name,
+                "key": key,
                 "value": {
                     "color"          : "",
                     "material"       : "",
@@ -1855,13 +1937,15 @@ class AFCLane:
                     "nozzle_temp"    : "",
                     "scan_time"      : "",
                     "td"             : "",
-                    "lane"           : self.lane_index,
+                    "lane"           : key.replace("T", ""),
                     "extruder_index" : self.lane_extruder_index,
                     "spool_id"       : None,
                     "weight"         : 0
                 }
             }
             self.afc.moonraker.send_lane_data(lane_data)
+
+        self._sent_lane_data_keys = current_keys
 
     def get_td1_data_load(self):
         """
@@ -2275,7 +2359,11 @@ class AFCLane:
         response['buffer'] = self.buffer_name
         response['buffer_status'] = self.buffer_status()
         response['lane'] = self.index
-        response['map'] = self.map
+        if not save_to_file:
+            response['map'] = self.map
+        else:
+            response['map'] = self.map_to_string()
+        response['current_map'] = self.current_map
         response['load'] = self.load_state
         response["prep"] =bool(self.prep_state)
         if self._selector_state is not None:
@@ -2314,7 +2402,8 @@ class AFCLane:
             response['td1_color']       = self.td1_data['color'] if "color" in self.td1_data else ''
             response['td1_scan_time']   = self.td1_data['scan_time'] if "scan_time" in self.td1_data else ''
 
-        if hasattr(self, "_endstops"):
+        if (hasattr(self, "_endstops")
+            and not save_to_file):
             response["endstops"] = ",".join(self._endstops.keys())
 
         return response

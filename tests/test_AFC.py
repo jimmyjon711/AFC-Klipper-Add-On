@@ -31,6 +31,17 @@ from extras.AFC_lane import AFCLaneState, AFCMoveWarning
 from klippy import Printer
 
 from tests.test_AFC_lane import _make_afc_lane
+
+
+def _build_gcmd(params=None, commandline=""):
+    """Build a gcmd mock backed by MockGCodeCommand, matching real Klipper's
+    sentinel-based .get()/.get_int()/.get_float() semantics -- a parameter
+    with no value in params and no default supplied by the caller raises,
+    rather than silently returning None."""
+    from tests.conftest import MockGCodeCommand
+    return MockGCodeCommand(params=params or {}, commandline=commandline)
+
+
 # ── State constants ───────────────────────────────────────────────────────────
 
 class TestStateConstants:
@@ -156,6 +167,7 @@ def _make_afc():
     obj.print_tool_temperatures = []
     obj.print_data_metadata = None
     obj.disable_print_temp_check = False
+    obj.enable_multiple_mapping = False
     return obj
 
 
@@ -240,7 +252,7 @@ class TestGetStatus:
         required = {
             "current_load", "current_state", "error_state",
             "lanes", "extruders", "hubs", "buffers", "units",
-            "message", "position_saved",
+            "message", "position_saved", "multiple_tool_mapping"
         }
         for key in required:
             assert key in status, f"Missing key: {key}"
@@ -281,6 +293,15 @@ class TestGetStatus:
         obj = _make_afc()
         assert obj.get_status()["version"] == AFC_VERSION
 
+    def test_multiple_tool_mapping_disabled(self):
+        obj = _make_afc()
+        assert obj.get_status()["multiple_tool_mapping"] == obj.enable_multiple_mapping
+    
+    def test_multiple_tool_mapping_enabled(self):
+        obj = _make_afc()
+        obj.enable_multiple_mapping = True
+        assert obj.get_status()["multiple_tool_mapping"] == obj.enable_multiple_mapping
+        
 
 # ── _webhooks_status ─────────────────────────────────────────────────────────
 
@@ -466,7 +487,7 @@ class TestCheckExtruderTemp:
         heater.can_extrude = True
         obj.function.is_printing.return_value = True
         obj.print_tool_temperatures = [230]
-        lane.map = "T0"
+        lane.current_map = "T0"
         result = obj._check_extruder_temp(lane)
         pheaters.set_temperature.assert_called_once_with(heater, 230.0)
         obj._wait_for_temp_within_tolerance.assert_called_once_with(obj.heater, 230,
@@ -481,7 +502,7 @@ class TestCheckExtruderTemp:
         )
         obj.function.is_printing.return_value = True
         obj.print_tool_temperatures = [180, 220, 260]
-        lane.map = "T1"
+        lane.current_map = "T1"
         result = obj._check_extruder_temp(lane)
         obj._get_default_material_temps.assert_not_called()
         pheaters.set_temperature.assert_called_once_with(heater, 220.0)
@@ -496,7 +517,7 @@ class TestCheckExtruderTemp:
         )
         obj.function.is_printing.return_value = True
         obj.print_tool_temperatures = [210]
-        lane.map = "T0"
+        lane.current_map = "T0"
         result = obj._check_extruder_temp(lane)
         pheaters.set_temperature.assert_called_once_with(heater, 210.0)
         obj._wait_for_temp_within_tolerance.assert_not_called()
@@ -510,7 +531,7 @@ class TestCheckExtruderTemp:
         )
         obj.function.is_printing.return_value = False
         obj.print_tool_temperatures = [999]
-        lane.map = "T0"
+        lane.current_map = "T0"
         result = obj._check_extruder_temp(lane)
         obj._get_default_material_temps.assert_called_once_with(lane)
         pheaters.set_temperature.assert_called_once_with(heater, 210.0)
@@ -525,7 +546,7 @@ class TestCheckExtruderTemp:
         )
         obj.function.is_printing.return_value = True
         obj.print_tool_temperatures = []
-        lane.map = "T0"
+        lane.current_map = "T0"
         result = obj._check_extruder_temp(lane)
         obj._get_default_material_temps.assert_called_once_with(lane)
         pheaters.set_temperature.assert_called_once_with(heater, 210.0)
@@ -550,7 +571,7 @@ class TestCheckExtruderTemp:
         heater.can_extrude = True
         obj.function.is_printing.return_value = True
         obj.print_tool_temperatures = []
-        lane.map = "T0"
+        lane.current_map = "T0"
         result = obj._check_extruder_temp(lane)
         obj._get_default_material_temps.assert_not_called()
         pheaters.set_temperature.assert_not_called()
@@ -567,7 +588,7 @@ class TestCheckExtruderTemp:
         heater.can_extrude = True
         obj.function.is_printing.return_value = True
         obj.print_tool_temperatures = []
-        lane.map = "T0"
+        lane.current_map = "T0"
         result = obj._check_extruder_temp(lane)
         obj._get_default_material_temps.assert_not_called()
         pheaters.set_temperature.assert_not_called()
@@ -584,23 +605,23 @@ class TestCheckExtruderTemp:
         heater.can_extrude = True
         obj.function.is_printing.return_value = True
         obj.print_tool_temperatures = [230]
-        lane.map = "T0"
+        lane.current_map = "T0"
         result = obj._check_extruder_temp(lane)
         obj._get_default_material_temps.assert_not_called()
         pheaters.set_temperature.assert_not_called()
         assert result is None
 
-    # ── lane.map parsing failures ─────────────────────────────────────────────
+    # ── lane.current_map parsing failures ─────────────────────────────────────
 
     def test_non_numeric_lane_map_returns_without_setting_temp(self):
-        """lane.map that doesn't parse to an int after stripping "T" (ValueError)
+        """lane.current_map that doesn't parse to an int after stripping "T" (ValueError)
         logs and returns without touching the heater."""
         obj, heater, extruder, pheaters, lane = _make_afc_for_check_extruder_temp(
             heater_target_temp=150, actual_temp=148, target_material_temp=210
         )
         obj.function.is_printing.return_value = True
         obj.print_tool_temperatures = [230]
-        lane.map = "custom_lane"
+        lane.current_map = "custom_lane"
         result = obj._check_extruder_temp(lane)
         pheaters.set_temperature.assert_not_called()
         obj._wait_for_temp_within_tolerance.assert_not_called()
@@ -610,26 +631,26 @@ class TestCheckExtruderTemp:
         assert any("custom_lane" in m for m in infos)
 
     def test_lane_map_index_out_of_range_returns_without_setting_temp(self):
-        """lane.map index beyond print_tool_temperatures' length (IndexError)
+        """lane.current_map index beyond print_tool_temperatures' length (IndexError)
         logs and returns without touching the heater."""
         obj, heater, extruder, pheaters, lane = _make_afc_for_check_extruder_temp(
             heater_target_temp=150, actual_temp=148, target_material_temp=210
         )
         obj.function.is_printing.return_value = True
         obj.print_tool_temperatures = [230]
-        lane.map = "T5"
+        lane.current_map = "T5"
         result = obj._check_extruder_temp(lane)
         pheaters.set_temperature.assert_not_called()
         obj._wait_for_temp_within_tolerance.assert_not_called()
         obj._get_default_material_temps.assert_not_called()
         assert result is None
         infos = [m for lvl, m in obj.logger.messages if lvl == "info"]
-        # Message logs lane.name + the caught exception, not cur_lane.map directly
+        # Message logs lane.name + the caught exception, not cur_lane.current_map directly
         # (see test_lane_map_attribute_error_returns_without_setting_temp for why).
         assert any(lane.name in m and "index out of range" in m for m in infos)
 
     def test_negative_lane_map_index_returns_without_setting_temp(self):
-        """lane.map that parses to a negative index (e.g. "T-1") is explicitly
+        """lane.current_map that parses to a negative index (e.g. "T-1") is explicitly
         rejected rather than silently wrapping around to the last entry in
         print_tool_temperatures via Python's negative-index semantics."""
         obj, heater, extruder, pheaters, lane = _make_afc_for_check_extruder_temp(
@@ -637,7 +658,7 @@ class TestCheckExtruderTemp:
         )
         obj.function.is_printing.return_value = True
         obj.print_tool_temperatures = [230, 999]
-        lane.map = "T-1"
+        lane.current_map = "T-1"
         result = obj._check_extruder_temp(lane)
         pheaters.set_temperature.assert_not_called()
         obj._wait_for_temp_within_tolerance.assert_not_called()
@@ -655,7 +676,7 @@ class TestCheckExtruderTemp:
         )
         obj.function.is_printing.return_value = True
         obj.print_tool_temperatures = {230}  # set: truthy but not subscriptable
-        lane.map = "T0"
+        lane.current_map = "T0"
         result = obj._check_extruder_temp(lane)
         pheaters.set_temperature.assert_not_called()
         obj._wait_for_temp_within_tolerance.assert_not_called()
@@ -665,11 +686,11 @@ class TestCheckExtruderTemp:
         assert any(lane.name in m and "not subscriptable" in m for m in infos)
 
     def test_lane_map_attribute_error_returns_without_setting_temp(self):
-        """An AttributeError raised while resolving lane.map (e.g. a custom
+        """An AttributeError raised while resolving lane.current_map (e.g. a custom
         object whose __str__ blows up) is caught and returns without touching
         the heater rather than propagating. The except handler must log via
-        lane.name/the caught exception rather than cur_lane.map -- referencing
-        cur_lane.map again here would re-raise the same AttributeError and
+        lane.name/the caught exception rather than cur_lane.current_map -- referencing
+        cur_lane.current_map again here would re-raise the same AttributeError and
         escape the try/except entirely."""
 
         class _RaisesAttributeError:
@@ -681,7 +702,7 @@ class TestCheckExtruderTemp:
         )
         obj.function.is_printing.return_value = True
         obj.print_tool_temperatures = [230]
-        lane.map = _RaisesAttributeError()
+        lane.current_map = _RaisesAttributeError()
         result = obj._check_extruder_temp(lane)
         pheaters.set_temperature.assert_not_called()
         obj._wait_for_temp_within_tolerance.assert_not_called()
@@ -700,7 +721,7 @@ class TestCheckExtruderTemp:
         )
         obj.function.is_printing.return_value = True
         obj.print_tool_temperatures = [None, 220]
-        lane.map = "T0"
+        lane.current_map = "T0"
         result = obj._check_extruder_temp(lane)
         obj._get_default_material_temps.assert_not_called()
         pheaters.set_temperature.assert_not_called()
@@ -1695,15 +1716,12 @@ class TestCmdChangeTool_NewExtruderTempParsing:
     """Tests for NEW_EXTRUDER_TEMP parameter parsing in cmd_CHANGE_TOOL."""
 
     def _make_gcmd(self, new_extruder_temp_str, lane="lane1", purge_length=None):
-        gcmd = MagicMock()
         # Use a T0 command line so cmd_CHANGE_TOOL takes the simple else-branch
         # (no "CHANGE" in command) and Tcmd = "T0" directly.
-        gcmd.get_commandline.return_value = "T0"
-        gcmd.get.side_effect = lambda key, default=None: {
+        return _build_gcmd({
             "PURGE_LENGTH": purge_length,
             "NEW_EXTRUDER_TEMP": new_extruder_temp_str,
-        }.get(key, default)
-        return gcmd
+        }, commandline="T0")
 
     def _make_afc_for_cmd(self):
         obj = _make_afc()
@@ -1761,12 +1779,10 @@ class TestCmdChangeTool_NewExtruderTempParsing:
     def test_invalid_purge_length_reports_error_and_does_not_call_change_tool(self):
         """A non-numeric PURGE_LENGTH triggers AFC_error and aborts without calling CHANGE_TOOL."""
         obj = self._make_afc_for_cmd()
-        gcmd = MagicMock()
-        gcmd.get_commandline.return_value = "T0"
-        gcmd.get.side_effect = lambda key, default=None: {
+        gcmd = _build_gcmd({
             "PURGE_LENGTH": "notanumber",
             "NEW_EXTRUDER_TEMP": None,
-        }.get(key, default)
+        }, commandline="T0")
         obj.cmd_CHANGE_TOOL(gcmd)
         obj.error.AFC_error.assert_called_once()
         error_msg = obj.error.AFC_error.call_args.args[0]
@@ -1775,11 +1791,9 @@ class TestCmdChangeTool_NewExtruderTempParsing:
 
 class TestCmdChange_ToolCheckBypass_CheckHomed():
     def _make_gcmd(self):
-        gcmd = MagicMock()
         # Use a T0 command line so cmd_CHANGE_TOOL takes the simple else-branch
         # (no "CHANGE" in command) and Tcmd = "T0" directly.
-        gcmd.get_commandline.return_value = "T0"
-        return gcmd
+        return _build_gcmd(commandline="T0")
 
     def test_check_bypass_True(self):
         obj, _, _ = _make_afc_for_change_tool()
@@ -1799,14 +1813,9 @@ class TestCmdChange_ToolCheckBypass_CheckHomed():
 
 class TestCmdChangeTool_SnapmakerPath:
     def _make_gcmd(self, tcmd="T0"):
-        gcmd = MagicMock()
         # Use a T0 command line so cmd_CHANGE_TOOL takes the simple else-branch
         # (no "CHANGE" in command) and Tcmd = "T0" directly.
-        gcmd.get_commandline.return_value = f"{tcmd} A0"
-        gcmd.get.side_effect = lambda key, default=None: {
-            "A": "0"
-        }.get(key, default)
-        return gcmd
+        return _build_gcmd({"A": "0"}, commandline=f"{tcmd} A0")
     def get_snapmaker_config_dir():
             pass
 
@@ -2178,8 +2187,7 @@ class TestCmdToolLoad_LaneLoadedGuard:
         obj, lane, extruder = self._make_cmd_afc()
         extruder.lane_loaded = "lane1"  # same as target
 
-        gcmd = MagicMock()
-        gcmd.get = lambda key, default=None: {"LANE": "lane1", "PURGE_LENGTH": None}.get(key, default)
+        gcmd = _build_gcmd({"LANE": "lane1", "PURGE_LENGTH": None})
 
         obj.cmd_TOOL_LOAD(gcmd)
 
@@ -2191,8 +2199,7 @@ class TestCmdToolLoad_LaneLoadedGuard:
         obj, lane, extruder = self._make_cmd_afc()
         extruder.lane_loaded = "lane2"  # different lane — stale, let TOOL_LOAD handle it
 
-        gcmd = MagicMock()
-        gcmd.get = lambda key, default=None: {"LANE": "lane1", "PURGE_LENGTH": None}.get(key, default)
+        gcmd = _build_gcmd({"LANE": "lane1", "PURGE_LENGTH": None})
 
         obj.cmd_TOOL_LOAD(gcmd)
 
@@ -2208,8 +2215,7 @@ class TestCmdToolLoad_LaneLoadedGuard:
         extruder.lane_loaded = None
         obj.TOOL_LOAD.return_value = False
 
-        gcmd = MagicMock()
-        gcmd.get = lambda key, default=None: {"LANE": "lane1", "PURGE_LENGTH": None}.get(key, default)
+        gcmd = _build_gcmd({"LANE": "lane1", "PURGE_LENGTH": None})
 
         obj.cmd_TOOL_LOAD(gcmd)
 
@@ -2220,8 +2226,7 @@ class TestCmdToolLoad_LaneLoadedGuard:
         obj, lane, extruder = self._make_cmd_afc()
         extruder.lane_loaded = None
 
-        gcmd = MagicMock()
-        gcmd.get = lambda key, default=None: {"LANE": "lane1", "PURGE_LENGTH": None}.get(key, default)
+        gcmd = _build_gcmd({"LANE": "lane1", "PURGE_LENGTH": None})
 
         obj.cmd_TOOL_LOAD(gcmd)
 
@@ -2239,9 +2244,7 @@ class TestCmdToolLoad_UnknownLane:
         obj.TOOL_LOAD = MagicMock(return_value=True)
         obj.error = MagicMock()
 
-        params = {"LANE": "lane_missing", "PURGE_LENGTH": None}
-        gcmd = MagicMock()
-        gcmd.get = lambda key, default=None: params.get(key, default)
+        gcmd = _build_gcmd({"LANE": "lane_missing", "PURGE_LENGTH": None})
 
         obj.cmd_TOOL_LOAD(gcmd)
 
@@ -2270,9 +2273,7 @@ class TestCmdToolUnload_ErrorCounting:
         return obj, lane
 
     def _make_gcmd(self):
-        gcmd = MagicMock()
-        gcmd.get = lambda key, default=None: {"LANE": "lane1"}.get(key, default)
-        return gcmd
+        return _build_gcmd({"LANE": "lane1"})
 
     def test_increase_unload_error_count_called_with_afc_instance(self):
         """increase_unload_error_count() now takes the afc instance itself
@@ -2312,10 +2313,7 @@ class TestCmdToolUnload_Guards:
 
     @staticmethod
     def _make_gcmd(params=None):
-        params = params or {}
-        gcmd = MagicMock()
-        gcmd.get = lambda key, default=None: params.get(key, default)
-        return gcmd
+        return _build_gcmd(params)
 
     def test_bypass_detected_returns_without_calling_tool_unload(self):
         """When _check_bypass(unload=True) is truthy, cmd_TOOL_UNLOAD returns
@@ -3196,11 +3194,7 @@ def _make_afc_for_lane_move(is_printing=False):
 
 
 def _make_gcmd(lane="lane1", distance=10.0, force=0):
-    gcmd = MagicMock()
-    gcmd.get.side_effect = lambda key, default=None: {"LANE": lane}.get(key, default)
-    gcmd.get_float.side_effect = lambda key, default=0: {"DISTANCE": distance}.get(key, default)
-    gcmd.get_int.side_effect = lambda key, default=0: {"FORCE": force}.get(key, default)
-    return gcmd
+    return _build_gcmd({"LANE": lane, "DISTANCE": distance, "FORCE": force})
 
 
 class TestCmdLaneMove:
@@ -3570,7 +3564,7 @@ class TestToolLoadNeedPurge:
         afc.gcode.run_script_from_command.assert_not_called()
 
         info_msgs = [m for lvl, m in afc.logger.messages if lvl == "info"]
-        assert any(f"Flag set to purge for {lane.extruder_obj.name}:{lane.map}" in m for m in info_msgs)
+        assert any(f"Flag set to purge for {lane.extruder_obj.name}:{lane.current_map}" in m for m in info_msgs)
 
     def test_need_purge_with_purge_length(self):
         afc, lane = self._make_afc_lane_for_need_purge()

@@ -20,7 +20,32 @@ import pytest
 from extras.AFC_utils import (
     check_and_return, section_in_config, DebounceButton, AFC_moonraker,
     VirtualRunoutHelper, VirtualFilamentSensor, AFC_PrintFileMetaData,
+    natural_sort_key,
 )
+from tests.conftest import MockGCodeCommand
+
+
+# ── natural_sort_key ────────────────────────────────────────────────────────
+
+class TestNaturalSortKey:
+    def test_sorts_t_macros_numerically_not_lexicographically(self):
+        items = ["T10", "T2", "T1", "T0"]
+        assert sorted(items, key=natural_sort_key) == ["T0", "T1", "T2", "T10"]
+
+    def test_digit_chunk_compares_as_int(self):
+        """Covers the digit branch of the inline conditional: "T10" and "T2"
+        share the same non-digit prefix, so only the int comparison of the
+        digit chunk decides the order."""
+        assert natural_sort_key("T2") < natural_sort_key("T10")
+
+    def test_non_digit_chunk_compares_as_lowercased_string(self):
+        """Covers the non-digit branch: differing prefixes are compared as
+        lowercased strings before any digit chunk is reached."""
+        assert natural_sort_key("ALPHA") < natural_sort_key("beta")
+
+    def test_placeholder_sorts_with_string_entries(self):
+        items = ["T1", "NONE", "T0"]
+        assert sorted(items, key=natural_sort_key) == ["NONE", "T0", "T1"]
 
 
 # ── check_and_return ──────────────────────────────────────────────────────────
@@ -1024,7 +1049,7 @@ class TestVirtualFilamentSensor:
         printer = self._make_printer_with_add_object()
         sensor = VirtualFilamentSensor(printer, "FPS1_expanded", logger=MagicMock())
         sensor.runout_helper.note_filament_present(100.0, True)
-        gcmd = MagicMock()
+        gcmd = MockGCodeCommand()
         sensor.cmd_QUERY_FILAMENT_SENSOR(gcmd)
         gcmd.respond_info.assert_called_once_with(
             "Filament Sensor FPS1_expanded: filament detected")
@@ -1032,7 +1057,7 @@ class TestVirtualFilamentSensor:
     def test_cmd_query_filament_sensor_reports_not_detected(self):
         printer = self._make_printer_with_add_object()
         sensor = VirtualFilamentSensor(printer, "FPS1_expanded", logger=MagicMock())
-        gcmd = MagicMock()
+        gcmd = MockGCodeCommand()
         sensor.cmd_QUERY_FILAMENT_SENSOR(gcmd)
         gcmd.respond_info.assert_called_once_with(
             "Filament Sensor FPS1_expanded: filament not detected")
@@ -1040,8 +1065,7 @@ class TestVirtualFilamentSensor:
     def test_cmd_set_filament_sensor_enables(self):
         printer = self._make_printer_with_add_object()
         sensor = VirtualFilamentSensor(printer, "FPS1_expanded", logger=MagicMock())
-        gcmd = MagicMock()
-        gcmd.get_int = MagicMock(return_value=1)
+        gcmd = MockGCodeCommand(params={"ENABLE": 1})
         sensor.cmd_SET_FILAMENT_SENSOR(gcmd)
         gcmd.get_int.assert_called_once_with("ENABLE", 1, minval=0, maxval=1)
         assert sensor.runout_helper.sensor_enabled is True
@@ -1050,7 +1074,6 @@ class TestVirtualFilamentSensor:
         printer = self._make_printer_with_add_object()
         sensor = VirtualFilamentSensor(printer, "FPS1_expanded", logger=MagicMock())
         sensor.runout_helper.sensor_enabled = True
-        gcmd = MagicMock()
-        gcmd.get_int = MagicMock(return_value=0)
+        gcmd = MockGCodeCommand(params={"ENABLE": 0})
         sensor.cmd_SET_FILAMENT_SENSOR(gcmd)
         assert sensor.runout_helper.sensor_enabled is False

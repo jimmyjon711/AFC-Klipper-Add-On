@@ -222,7 +222,10 @@ def _make_afc_lane(fullname="AFC_stepper lane1"):
     lane.short_moves_accel = 100
     lane._load_state = False
     lane.runout_lane = None
-    lane.map = "T0"
+    lane.map = ["T0"]
+    lane._map = ["T0"]
+    lane.current_map = "T0"
+    lane._sent_lane_data_keys = []
     lane.gcode = MagicMock()
     lane.need_purge = False
     return lane
@@ -1183,20 +1186,112 @@ class TestAFCLaneLoadEs:
 
         assert lane_a.load_es != lane_b.load_es
 
+
+# ── map_to_string ─────────────────────────────────────────────────────────────
+
+class TestMapToString:
+    def test_returns_none_when_map_is_empty(self):
+        lane = _make_afc_lane()
+        lane.map = []
+        assert lane.map_to_string() == "NONE"
+
+    def test_joins_single_entry(self):
+        lane = _make_afc_lane()
+        lane.map = ["T0"]
+        assert lane.map_to_string() == "T0"
+
+    def test_sorts_entries_naturally_low_to_high(self):
+        lane = _make_afc_lane()
+        lane.map = ["T10", "T2", "T0"]
+        assert lane.map_to_string() == "T0, T2, T10"
+
+
+# ── _map_to_string ────────────────────────────────────────────────────────────
+
+class Test_MapToString:
+    def test_joins_single_entry(self):
+        lane = _make_afc_lane()
+        lane._map = ["T0"]
+        assert lane._map_to_string() == "T0"
+
+    def test_sorts_entries_naturally_low_to_high(self):
+        lane = _make_afc_lane()
+        lane._map = ["T10", "T2", "T0"]
+        assert lane._map_to_string() == "T0, T2, T10"
+
+    def test_empty_list_returns_none_placeholder(self):
+        lane = _make_afc_lane()
+        lane._map = []
+        assert lane._map_to_string() == "NONE"
+
+
+# ── get_status: map sorting ───────────────────────────────────────────────────
+
+def _make_lane_for_get_status(map_value):
+    """Build a lane with just enough state for get_status() to run."""
+    lane = _make_afc_lane()
+    lane.connect_done = True
+    lane.unit = "Turtle_1"
+    lane.hub = "PB1"
+    lane.afc_extruder_name = "extruder"
+    lane.buffer_name = None
+    lane.buffer_status = lambda: "None"
+    lane.index = "0"
+    lane.map = map_value
+    lane.current_map = "T0"
+    lane.prep_state = False
+    lane._selector_state = None
+    lane.tool_loaded = False
+    lane.loaded_to_hub = False
+    lane.material = ""
+    lane.remember_spool = False
+    lane.spool_id = None
+    lane.color = ""
+    lane.filament_name = ""
+    lane.multi_color = []
+    lane.weight = 0
+    lane.extruder_temp = None
+    lane.bed_temp = None
+    lane.runout_lane = None
+    lane.status = None
+    lane.dist_hub = 900
+    lane.td1_data = {}
+    lane.afc.function.get_filament_status = MagicMock(return_value="a:b")
+    return lane
+
+
+class TestGetStatusMapSorting:
+    def test_map_returns_raw_unsorted_list(self):
+        """Unlike map_to_string(), the live (not save_to_file) branch returns
+        self.map as-is -- other code relies on map[0] being the first
+        assigned mapping, not the naturally-lowest one, so insertion order
+        must be preserved here."""
+        lane = _make_lane_for_get_status(["T10", "T2", "T0"])
+        response = lane.get_status()
+        assert response["map"] == ["T10", "T2", "T0"]
+        assert lane.map == ["T10", "T2", "T0"]
+
+    def test_save_to_file_uses_map_to_string_instead_of_raw_list(self):
+        lane = _make_lane_for_get_status(["T10", "T2", "T0"])
+        lane.td1_data = {"td": "", "color": "", "scan_time": ""}
+        response = lane.get_status(save_to_file=True)
+        assert response["map"] == "T0, T2, T10"
+
+
 class TestAFCLaneIndexProperty:
     def test_lane_index_property_map_none(self):
         lane = _make_afc_lane()
-        lane.map = None
+        lane.current_map = None
         assert lane.lane_index == ""
-    
+
     def test_lane_index_property_map_set(self):
         lane = _make_afc_lane()
-        lane.map = "T5"
+        lane.current_map = "T5"
         assert lane.lane_index == "5"
-    
+
     def test_lane_index_property_is_str(self):
         lane = _make_afc_lane()
-        lane.map = "T5"
+        lane.current_map = "T5"
         assert isinstance(lane.lane_index, str)
 
 class TestAFCLaneExtruderIndexProperty:
@@ -1472,7 +1567,9 @@ class TestIsNormalPrintingState:
 def _make_lane_for_moonraker(extruder_name="extruder", map_value="T0"):
     """Build a minimal AFCLane wired up for send/clear lane data tests."""
     lane = _make_afc_lane("AFC_stepper lane1")
-    lane.map = map_value
+    lane.map = [map_value] if map_value is not None else []
+    lane._sent_lane_data_keys = []
+    lane.afc.tool_cmds = {}
     lane.extruder_obj = MagicMock()
     lane.extruder_obj.th_extruder_name = lane.extruder_obj.name = extruder_name
     lane.color = "#FF0000"
@@ -1486,14 +1583,14 @@ def _make_lane_for_moonraker(extruder_name="extruder", map_value="T0"):
 
 
 def _get_sent_payload(lane):
-    """Call send_lane_data and return the payload passed to moonraker."""
+    """Call send_lane_data and return the single payload passed to moonraker."""
     lane.send_lane_data()
     lane.afc.moonraker.send_lane_data.assert_called_once()
     return lane.afc.moonraker.send_lane_data.call_args[0][0]
 
 
 def _get_cleared_payload(lane):
-    """Call clear_lane_data and return the payload passed to moonraker."""
+    """Call clear_lane_data and return the single payload passed to moonraker."""
     lane.clear_lane_data()
     lane.afc.moonraker.send_lane_data.assert_called_once()
     return lane.afc.moonraker.send_lane_data.call_args[0][0]
@@ -1528,20 +1625,26 @@ class TestSendLaneDataExtruderIndex:
         payload = _get_sent_payload(lane)
         assert payload["namespace"] == "lane_data"
 
+    def test_key_is_the_t_command_not_the_lane_name(self):
+        """The record's "key" is now the T(n) mapping itself, not the lane
+        name -- see test_multiple_mappings_send_one_record_each for why."""
+        lane = _make_lane_for_moonraker(map_value="T2")
+        payload = _get_sent_payload(lane)
+        assert payload["key"] == "T2"
+        assert payload["value"]["lane"] == "2"
+
     def test_weight_is_included(self):
         lane = _make_lane_for_moonraker()
         payload = _get_sent_payload(lane)
         assert payload["value"]["weight"] == 750.0
 
-    def test_no_send_when_map_is_none(self):
-        lane = _make_lane_for_moonraker()
-        lane.map = None
+    def test_no_send_when_map_is_empty(self):
+        lane = _make_lane_for_moonraker(map_value=None)
         lane.send_lane_data()
         lane.afc.moonraker.send_lane_data.assert_not_called()
 
-    def test_no_send_when_map_has_no_T(self):
-        lane = _make_lane_for_moonraker()
-        lane.map = "0"
+    def test_no_send_when_map_is_none_placeholder(self):
+        lane = _make_lane_for_moonraker(map_value="NONE")
         lane.send_lane_data()
         lane.afc.moonraker.send_lane_data.assert_not_called()
 
@@ -1554,6 +1657,59 @@ class TestSendLaneDataExtruderIndex:
         # afc.moonraker is None here, so there's nothing to assert the call
         # against -- the AttributeError that not-called would otherwise
         # crash into is exactly what the guard is meant to prevent.
+
+    def test_multiple_mappings_send_one_record_each(self):
+        lane = _make_lane_for_moonraker(map_value="T0")
+        lane.map = ["T0", "T3"]
+        lane.send_lane_data()
+        calls = lane.afc.moonraker.send_lane_data.call_args_list
+        assert len(calls) == 2
+        keys = {c.args[0]["key"] for c in calls}
+        assert keys == {"T0", "T3"}
+        lane_fields = {c.args[0]["value"]["lane"] for c in calls}
+        assert lane_fields == {"0", "3"}
+
+    def test_multiple_mappings_share_same_spool_data(self):
+        lane = _make_lane_for_moonraker(map_value="T0")
+        lane.map = ["T0", "T3"]
+        lane.send_lane_data()
+        colors = {c.args[0]["value"]["color"] for c in lane.afc.moonraker.send_lane_data.call_args_list}
+        assert colors == {"#FF0000"}
+
+    def test_updates_sent_keys_after_send(self):
+        lane = _make_lane_for_moonraker(map_value="T0")
+        lane.map = ["T0", "T3"]
+        lane.send_lane_data()
+        assert lane._sent_lane_data_keys == ["T0", "T3"]
+
+    def test_removes_stale_key_no_longer_owned_by_anyone(self):
+        """A T(n) that was mapped last call but isn't anymore, and isn't in
+        any lane's own map list, gets its record removed."""
+        lane = _make_lane_for_moonraker(map_value="T0")
+        lane._sent_lane_data_keys = ["T0", "T3"]
+        lane.afc.lanes = {lane.name: lane}
+        lane.send_lane_data()
+        lane.afc.moonraker.remove_database_entry.assert_called_once_with("lane_data", "T3")
+
+    def test_does_not_remove_stale_key_reassigned_to_another_lane(self):
+        """A T(n) that moved to a different lane's own map (e.g. during a
+        swap) must not be removed -- the new owner's own send_lane_data()
+        call is responsible for that key's record."""
+        lane = _make_lane_for_moonraker(map_value="T0")
+        lane._sent_lane_data_keys = ["T0", "T3"]
+        other_lane = MagicMock()
+        other_lane.map = ["T3"]
+        lane.afc.lanes = {lane.name: lane, "lane2": other_lane}
+        lane.send_lane_data()
+        lane.afc.moonraker.remove_database_entry.assert_not_called()
+
+    def test_no_stale_removal_when_key_still_mapped(self):
+        """Covers the `key not in current_keys` half of the removal
+        condition being falsy on its own."""
+        lane = _make_lane_for_moonraker(map_value="T0")
+        lane._sent_lane_data_keys = ["T0"]
+        lane.send_lane_data()
+        lane.afc.moonraker.remove_database_entry.assert_not_called()
 
 
 class TestClearLaneDataExtruderIndex:
@@ -1573,6 +1729,12 @@ class TestClearLaneDataExtruderIndex:
         payload = _get_cleared_payload(lane)
         assert isinstance(payload["value"]["extruder_index"], int)
 
+    def test_key_is_the_t_command(self):
+        lane = _make_lane_for_moonraker(map_value="T2")
+        payload = _get_cleared_payload(lane)
+        assert payload["key"] == "T2"
+        assert payload["value"]["lane"] == "2"
+
     def test_color_is_cleared(self):
         lane = _make_lane_for_moonraker()
         payload = _get_cleared_payload(lane)
@@ -1583,9 +1745,23 @@ class TestClearLaneDataExtruderIndex:
         payload = _get_cleared_payload(lane)
         assert payload["value"]["weight"] == 0
 
-    def test_no_clear_when_map_is_none(self):
-        lane = _make_lane_for_moonraker()
-        lane.map = None
+    def test_clears_one_record_per_mapping(self):
+        lane = _make_lane_for_moonraker(map_value="T0")
+        lane.map = ["T0", "T3"]
+        lane.clear_lane_data()
+        calls = lane.afc.moonraker.send_lane_data.call_args_list
+        assert len(calls) == 2
+        keys = {c.args[0]["key"] for c in calls}
+        assert keys == {"T0", "T3"}
+
+    def test_updates_sent_keys_after_clear(self):
+        lane = _make_lane_for_moonraker(map_value="T0")
+        lane.map = ["T0", "T3"]
+        lane.clear_lane_data()
+        assert lane._sent_lane_data_keys == ["T0", "T3"]
+
+    def test_no_clear_when_map_is_empty(self):
+        lane = _make_lane_for_moonraker(map_value=None)
         lane.clear_lane_data()
         lane.afc.moonraker.send_lane_data.assert_not_called()
 
@@ -2541,7 +2717,7 @@ class TestPerformInfiniteRunout:
         afc.error.pause_resume.send_pause_command.assert_called_once()
         afc.save_pos.assert_called_once()
         afc.CHANGE_TOOL.assert_called_with(lane2, restore_pos=False)
-        lane.gcode.run_script_from_command.assert_called_with(f"SET_MAP LANE={lane2.name} MAP={lane.map}")
+        lane.gcode.run_script_from_command.assert_called_with(f"AFC_SWAP_MAPPING FROM={lane.name} TO={lane2.name}")
         afc.restore_pos.assert_called_once()
         afc.error.pause_resume.send_resume_command.assert_called_once()
         lane.unit_obj.lane_not_ready.assert_called_with(lane)

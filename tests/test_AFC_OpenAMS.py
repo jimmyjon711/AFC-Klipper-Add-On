@@ -2061,7 +2061,9 @@ def _make_lane(name, index=1, **overrides):
     lane.remember_spool = False
     lane.tool_loaded = False
     lane.load_state = False
-    lane.map = "T0"
+    lane.map = ["T0"]
+    lane.current_map = "T0"
+    lane.map_to_string = MagicMock(return_value="T0")
     lane._oams_runout_detected = False
     for k, v in overrides.items():
         setattr(lane, k, v)
@@ -2912,7 +2914,7 @@ class TestHandleSameFpsReload:
             "info", "Same-FPS reload complete: lane2 now active"
         ) in ams.logger.messages
 
-    def test_remaps_source_map_when_present(self):
+    def test_swaps_mapping_via_afc_swap_mapping_when_source_map_present(self):
         ams, afc, printer, reactor = _make_ams()
         ams._oams_load = MagicMock(return_value=True)
         ams.lane_not_ready = MagicMock()
@@ -2924,12 +2926,11 @@ class TestHandleSameFpsReload:
         ams.handle_same_fps_reload(source, target)
 
         ams.gcode.run_script_from_command.assert_called_once_with(
-            "SET_MAP LANE=lane2 MAP=T0")
-        assert (
-            "info", "Remapped T0 from lane1 to lane2"
-        ) in ams.logger.messages
+            "AFC_SWAP_MAPPING FROM=lane1 TO=lane2")
 
-    def test_no_source_map_skips_remap(self):
+    def test_swaps_mapping_via_afc_swap_mapping_when_no_source_map(self):
+        """AFC_SWAP_MAPPING is called unconditionally, regardless of whether
+        the source lane currently has a map assigned."""
         ams, afc, printer, reactor = _make_ams()
         ams._oams_load = MagicMock(return_value=True)
         ams.lane_not_ready = MagicMock()
@@ -2940,7 +2941,8 @@ class TestHandleSameFpsReload:
 
         ams.handle_same_fps_reload(source, target)
 
-        ams.gcode.run_script_from_command.assert_not_called()
+        ams.gcode.run_script_from_command.assert_called_once_with(
+            "AFC_SWAP_MAPPING FROM=lane1 TO=lane2")
 
     def test_hardware_load_failure_pauses_and_returns_false(self):
         ams, afc, printer, reactor = _make_ams()
@@ -3772,20 +3774,8 @@ class TestPollOamsSensors:
 
 def _make_gcmd(values=None):
     """Minimal gcmd stand-in matching AFC's GCodeCommand-ish interface."""
-    values = values or {}
-    gcmd = MagicMock()
-
-    def get_float(name, default=None, **kwargs):
-        return values.get(name, default)
-
-    def get_int(name, default=None, **kwargs):
-        return values.get(name, default)
-
-    gcmd.get_float = MagicMock(side_effect=get_float)
-    gcmd.get_int = MagicMock(side_effect=get_int)
-    gcmd.error = MagicMock(side_effect=lambda msg: Exception(msg))
-    gcmd.respond_info = MagicMock()
-    return gcmd
+    from tests.conftest import MockGCodeCommand
+    return MockGCodeCommand(params=values or {})
 
 
 # ── Stuck spool / clog callbacks ───────────────────────────────────────────
@@ -4050,9 +4040,7 @@ class TestStuckSpoolRecoveryClearOamsState:
 
 class TestCmdStuckSpoolRecovery:
     def _gcmd(self, lane="lane1", fps="fps1"):
-        gcmd = MagicMock()
-        gcmd.get = MagicMock(side_effect=lambda k, default=None: {"LANE": lane, "FPS": fps}.get(k, default))
-        return gcmd
+        return _make_gcmd({"LANE": lane, "FPS": fps})
 
     def test_lane_not_found_falls_back(self):
         ams, afc, printer, reactor = _make_ams()

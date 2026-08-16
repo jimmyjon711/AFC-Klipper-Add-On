@@ -1,6 +1,6 @@
-# AFCProject Automated Filament Changer
+# AFCProject Automated Filament Changer Software
 #
-# Copyright (C) 2024-2026 AFCProject
+# Copyright (C) 2026 AFCProject
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
@@ -1487,7 +1487,7 @@ class afcAMS(afcUnit):
             self.afc.function.TcmdAssign(cur_lane)
         cur_lane.do_enable(False)
         self.logger.info('{lane_name} tool cmd: {tcmd:3} {msg}'.format(
-            lane_name=cur_lane.name, tcmd=cur_lane.map, msg=msg))
+            lane_name=cur_lane.name, tcmd=cur_lane.map_to_string(), msg=msg))
         cur_lane.set_afc_prep_done()
         return succeeded
 
@@ -2311,12 +2311,7 @@ class afcAMS(afcUnit):
                 f"Same-FPS reload failed for {target_name}: {e}", pause=True)
             return False
 
-        source_map = getattr(source_lane, 'map', None)
-        if source_map:
-            self.gcode.run_script_from_command(
-                f'SET_MAP LANE={target_name} MAP={source_map}')
-            self.logger.info(
-                f"Remapped {source_map} from {source_name} to {target_name}")
+        self.gcode.run_script_from_command(f'AFC_SWAP_MAPPING FROM={source_name} TO={target_name}')
 
         target_lane.set_tool_loaded()
         self.lane_tool_loaded(target_lane)
