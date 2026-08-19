@@ -1,0 +1,183 @@
+=== FILES ===
+--- AFC_Claymore_1.cfg ---
+[include mcu/AFC_Lite_Claymore.cfg]
+
+[mcu Claymore_1]
+# canbus_uuid: <insert can id here>
+serial: <insert your serial here>
+
+[temperature_sensor Claymore_1]
+sensor_type: temperature_mcu
+sensor_mcu: Claymore_1
+
+[AFC_Claymore Claymore_1]
+hub: Claymore_1
+extruder: extruder
+buffer: Claymore_buffer
+drive_stepper: Claymore_drive
+selector_stepper: Claymore_selector
+long_moves_speed: 300
+long_moves_accel: 300
+enable_buffer_tool_check: True
+
+[AFC_stepper Claymore_drive]
+unit: Claymore_1
+step_pin: Claymore_1:M1_STEP
+dir_pin: !Claymore_1:M1_DIR
+enable_pin: !Claymore_1:M1_EN
+microsteps: 16
+gear_ratio: 40:20               # 20T
+rotation_distance: 35.1          # 20T, Calibrate for your setup
+
+[tmc2209 AFC_stepper Claymore_drive]
+uart_pin: Claymore_1:M1_UART
+uart_address: 0
+run_current: 0.8
+sense_resistor: 0.110
+
+[AFC_stepper Claymore_selector]
+unit: Claymore_1
+step_pin: Claymore_1:M2_STEP
+dir_pin: !Claymore_1:M2_DIR        # Selector should rotate in counter clockwise direction
+enable_pin: !Claymore_1:M2_EN
+microsteps: 16
+gear_ratio: 40:20               # 20T
+rotation_distance: 35.5          # 20T, Calibrate for your setup
+
+[tmc2209 AFC_stepper Claymore_selector]
+uart_pin: Claymore_1:M2_UART
+uart_address: 0
+run_current: 0.8
+sense_resistor: 0.110
+
+[AFC_lane lane1]
+unit: Claymore_1:1
+dist_hub: 100
+led_index: Claymore_Indicator_1:1
+afc_motor_rwd: Claymore_1:MOT1_RWD
+afc_motor_fwd: Claymore_1:MOT1_FWD
+afc_motor_enb: Claymore_1:MOT1_EN
+fwd_speed_multiplier: 0.3
+pwm: True
+load: ^Claymore_1:LOAD1
+selector: !Claymore_1:SEL1
+
+
+[AFC_lane lane2]
+unit: Claymore_1:2
+dist_hub: 29.83 
+led_index: Claymore_Indicator_1:2
+afc_motor_rwd: Claymore_1:MOT2_RWD
+afc_motor_fwd: Claymore_1:MOT2_FWD
+afc_motor_enb: Claymore_1:MOT2_EN
+fwd_speed_multiplier: 0.3
+pwm: True
+load: ^Claymore_1:LOAD2
+selector: !Claymore_1:SEL2
+
+[AFC_lane lane3]
+unit: Claymore_1:3
+dist_hub: 100 
+led_index: Claymore_Indicator_1:3
+afc_motor_rwd: Claymore_1:MOT3_RWD
+afc_motor_fwd: Claymore_1:MOT3_FWD
+afc_motor_enb: Claymore_1:MOT3_EN
+fwd_speed_multiplier: 0.3
+pwm: True
+load: ^Claymore_1:LOAD3
+selector: !Claymore_1:SEL3
+
+[AFC_lane lane4]
+unit: Claymore_1:4
+dist_hub: 100
+led_index: Claymore_Indicator_1:4
+afc_motor_rwd: Claymore_1:MOT4_RWD
+afc_motor_fwd: Claymore_1:MOT4_FWD
+afc_motor_enb: Claymore_1:MOT4_EN
+fwd_speed_multiplier: 0.3
+pwm: True
+load: ^Claymore_1:LOAD4
+selector: !Claymore_1:SEL4
+
+[AFC_hub Claymore_1]
+afc_bowden_length: 1015.036
+cut: False
+switch_pin: Claymore_1:HUB
+
+[AFC_buffer Claymore_buffer]
+advance_pin: ^!Claymore_1:ADV
+trailing_pin: ^!Claymore_1:TRL
+multiplier_high: 1.15
+multiplier_low: 0.90
+
+[AFC_led Claymore_Indicator_1]
+pin: Claymore_1:RGB1
+chain_count: 4
+color_order: GRBW
+initial_RED: 0.0
+initial_GREEN: 0.0
+initial_BLUE: 0.0
+initial_WHITE: 0.0--- end AFC_Claymore_1.cfg ---
+--- AFC_Hardware.cfg ---
+[force_move]
+enable_force_move: True
+
+[AFC_extruder extruder]
+pin_tool_start: enter_tool_pin
+#pin_tool_end: None
+tool_stn: 72                    # See documentation for details on how to calculate this value. https://www.afcproject.dev/toolhead/calculation.html
+tool_stn_unload: 100            # See documentation for details on how to calculate this value. https://www.afcproject.dev/toolhead/calculation.html
+tool_sensor_after_extruder: 0   # Extra distance to move in mm once pre/post sensors are clear. Useful for when only using post sensor, so this distance can be the amount to move to clear extruder gears
+tool_unload_speed: 25           # Unload speed in mm/s when unloading toolhead. Default is 25mm/s.
+tool_load_speed: 25             # Load speed in mm/s when loading toolhead. Default is 25mm/s.
+
+#[filament_switch_sensor bypass]
+#switch_pin: turtleneck:PB5
+#pause_on_runout: False
+
+[AFC_buffer TN]
+advance_pin: <enter_pin>    # set advance pin
+trailing_pin: <enter_pin>  # set trailing pin
+multiplier_high: 1.05   # default 1.05, factor to feed more filament
+multiplier_low:  0.95   # default 0.95, factor to feed less filament
+
+#--=================================================================================--#
+######### Tip Cut Servo ###############################################################
+#--=================================================================================--#
+#[servo tool_cut]
+# Pin for the cut pin servo.
+#pin: YOUR_SERVO_PIN_HERE
+# Adjust this value until a '_CUTTER_SERVO POS=out' extends the pin fully without a
+# buzzing sound
+#minimum_pulse_width: 0.00053
+# Adjust this value until a '_CUTTER_SERVO POS=in' retracts the pin fully without a
+# buzzing sound
+#maximum_pulse_width: 0.0023
+# Leave this value at 180
+#maximum_servo_angle: 180
+#   Initial angle (in degrees) to set the servo to. The default is to
+#   not send any signal at startup.--- end AFC_Hardware.cfg ---
+--- mcu/AFC_Lite_Claymore.cfg ---
+[board_pins afc_lite_claymore]
+mcu: Claymore_1
+aliases:
+    M1_STEP=PD4     , M1_DIR=PD3    , M1_EN=PD6     , M1_UART=PD5   , # M1_DIAG=PD2   ,
+    M2_STEP=PC12    , M2_DIR=PC11   , M2_EN=PD1     , M2_UART=PD0   , # M2_DIAG=PC10  ,
+    M3_STEP=PE2     , M3_DIR=PE3    , M3_EN=PE0     , M3_UART=PE1   , # M3_DIAG=PE4   ,
+    M4_STEP=PD15    , M4_DIR=PD14   , M4_EN=PC7     , M4_UART=PC6   , # M4_DIAG=PC8   ,
+
+    LOAD1=PB0       , LOAD2=PB1     , LOAD3=PB2     , LOAD4=PE7     ,
+    SEL1=PE10       , SEL2=PE11     , SEL3=PE12     , SEL4=PE13     ,
+
+    HUB=PE8         , TRL=PE9       , ADV=PC5       ,
+    
+    MOT1_RWD=PA0    , MOT1_FWD=PA1  , MOT1_EN=PA2   ,
+    MOT2_RWD=PA6    , MOT2_FWD=PA7  , MOT2_EN=PA5   ,
+    MOT3_RWD=PB14   , MOT3_FWD=PB15 , MOT3_EN=PB13  ,
+    MOT4_RWD=PD12   , MOT4_FWD=PD13 , MOT4_EN=PD11  ,
+    
+    RGB1=PE14       , RGB2=PE15     , RGB3=PB10     , RGB4=PB11,
+
+    # The following pins are all ADC pins on the AFC-Lite board for the PSF sensor
+    # SW1(PC4), SW2(PC5), SW3(PB0), SW4(PB1) 
+    PSF=PC4,--- end mcu/AFC_Lite_Claymore.cfg ---

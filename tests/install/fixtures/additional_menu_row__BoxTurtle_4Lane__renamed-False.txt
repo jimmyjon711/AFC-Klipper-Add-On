@@ -1,0 +1,4 @@
+=== OUTPUT ===
+1. BoxTurtle Name: Turtle_2 
+=== VARS ===
+boxturtle_name=Turtle_2

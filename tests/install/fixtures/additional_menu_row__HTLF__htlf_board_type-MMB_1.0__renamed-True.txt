@@ -1,0 +1,5 @@
+=== OUTPUT ===
+1. HTLF Name: Foo_1 
+D. HTLF Board Type : MMB_1.0 
+=== VARS ===
+boxturtle_name=Foo_1

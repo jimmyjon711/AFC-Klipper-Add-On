@@ -1,0 +1,917 @@
+=== FILES ===
+--- AFC_EMU_1.cfg ---
+[include mcu/EMU_1.cfg]
+
+[mcu EMU_1_lane1]
+canbus_uuid: <replace with your can UUID>
+#canbus_interface: can1         # Uncomment if using a CAN bus other than can0
+#serial: <replace with your /dev/serial/by-id/...> and comment out canbus_uuid above
+
+[mcu EMU_1_lane2]
+canbus_uuid: <replace with your can UUID>
+#canbus_interface: can1         # Uncomment if using a CAN bus other than can0
+#serial: <replace with your /dev/serial/by-id/...> and comment out canbus_uuid above
+
+[mcu EMU_1_lane3]
+canbus_uuid: <replace with your can UUID>
+#canbus_interface: can1         # Uncomment if using a CAN bus other than can0
+#serial: <replace with your /dev/serial/by-id/...> and comment out canbus_uuid above
+
+[mcu EMU_1_lane4]
+canbus_uuid: <replace with your can UUID>
+#canbus_interface: can1         # Uncomment if using a CAN bus other than can0
+#serial: <replace with your /dev/serial/by-id/...> and comment out canbus_uuid above
+
+[mcu EMU_1_lane5]
+canbus_uuid: <replace with your can UUID>
+#canbus_interface: can1         # Uncomment if using a CAN bus other than can0
+#serial: <replace with your /dev/serial/by-id/...> and comment out canbus_uuid above
+
+[mcu EMU_1_lane6]
+canbus_uuid: <replace with your can UUID>
+#canbus_interface: can1         # Uncomment if using a CAN bus other than can0
+#serial: <replace with your /dev/serial/by-id/...> and comment out canbus_uuid above
+
+[mcu EMU_1_lane7]
+canbus_uuid: <replace with your can UUID>
+#canbus_interface: can1         # Uncomment if using a CAN bus other than can0
+#serial: <replace with your /dev/serial/by-id/...> and comment out canbus_uuid above
+
+[mcu EMU_1_lane8]
+canbus_uuid: <replace with your can UUID>
+#canbus_interface: can1         # Uncomment if using a CAN bus other than can0
+#serial: <replace with your /dev/serial/by-id/...> and comment out canbus_uuid above
+
+[AFC_EMU EMU_1]
+hub: EMU_1_HUB
+extruder: extruder
+buffer: EMU_1_buffer
+# The following speeds below are conservative, speeds have been tested up to 500mm/s, recommended
+# running speeds at 400mm/s or less.
+long_moves_speed: 250
+long_moves_accel: 120
+#long_moves_speed: 300
+#long_moves_accel: 300
+
+[AFC_stepper lane1]
+unit: EMU_1:1
+step_pin: EMU_1_lane1:MOT_STEP
+dir_pin: EMU_1_lane1:MOT_DIR
+enable_pin: !EMU_1_lane1:MOT_EN
+microsteps: 4
+rotation_distance: 22.7574
+gear_ratio: 1:1
+dist_hub: 2000
+led_index: EMU_1_Indicator_1:1
+led_spool_index: EMU_1_Indicator_1:2
+# If using SLB board comment out the above led_index and led_spool_index and
+# uncomment the indexes below. Then comment out [AFC_led EMU_1_Indicator_1] configuration
+# section and uncomment both [AFC_led EMU_1_Indicator_Button_1] and [AFC_led EMU_1_Indicator_Box_1]
+# configuration sections.
+#led_index: EMU_1_Indicator_Button_1:1-4
+#led_spool_index: EMU_1_Indicator_Box_1:1
+prep: ^!EMU_1_lane1:TRG
+load: ^EMU_1_lane1:LOAD
+print_current: 0.4
+
+[tmc2209 AFC_stepper lane1]
+uart_pin: EMU_1_lane1:MOT_UART
+uart_address: 0
+run_current: 0.8
+sense_resistor: 0.110
+
+[AFC_button lane1]
+pin: ^!EMU_1_lane1:BUTTON
+
+[temperature_sensor lane1]
+sensor_type: BME280
+i2c_address: 118
+# If using AHT20 sensor, comment out sensor_type and i2c_address above and uncomment
+# the lines below
+#sensor_type: AHT2X
+#i2c_address: 56
+i2c_mcu: EMU_1_lane1
+i2c_software_scl_pin: EMU_1_lane1:TEMP_SCL
+i2c_software_sda_pin: EMU_1_lane1:TEMP_SCA
+# If using SLB board and would like to use hardware I2C, comment out software SCL/SDA pins
+# and uncomment i2c_bus below
+#i2c_bus: i2c2_PB10_PB11
+
+[temperature_sensor EMU_1_mcu_lane1]
+sensor_type: temperature_mcu
+sensor_mcu: EMU_1_lane1
+
+[controller_fan EMU_1_fan_lane1]
+pin: EMU_1_lane1:FAN
+max_power: 1
+kick_start_time: 0.5
+stepper: AFC_stepper lane1
+
+# Based on your configuration, LED configuration must be selected from the below:
+
+############### EBB + LED PCB ###############
+
+#[AFC_led EMU_1_Indicator_1]
+#pin: EMU_1_lane1:RGB
+#chain_count: 5
+#color_order: GRBW
+#initial_RED: 0.0
+#initial_GREEN: 0.0
+#initial_BLUE: 0.0
+#initial_WHITE: 0.0
+
+############### SLB + LED PCB ###############
+
+#[AFC_led EMU_1_Indicator_Button_1]
+#pin: EMU_1_lane1:RGB_button
+#chain_count: 4
+#color_order: GRBW
+#initial_RED: 0.0
+#initial_GREEN: 0.0
+#initial_BLUE: 0.0
+#initial_WHITE: 0.0
+
+#[AFC_led EMU_1_Indicator_Box_1]
+#pin: EMU_1_lane1:RGB_box
+#chain_count: 1
+#color_order: GRBW
+#initial_RED: 0.0
+#initial_GREEN: 0.0
+#initial_BLUE: 0.0
+#initial_WHITE: 0.0
+
+############### EBB + neopixel eject buttons ###############
+
+[AFC_led EMU_1_Indicator_1]
+pin: EMU_1_lane1:RGB
+chain_count: 2
+color_order: GRBW
+initial_RED: 0.0
+initial_GREEN: 0.0
+initial_BLUE: 0.0
+initial_WHITE: 0.0
+
+[AFC_stepper lane2]
+unit: EMU_1:2
+step_pin: EMU_1_lane2:MOT_STEP
+dir_pin: EMU_1_lane2:MOT_DIR
+enable_pin: !EMU_1_lane2:MOT_EN
+microsteps: 4
+rotation_distance: 22.7574
+gear_ratio: 1:1
+dist_hub: 2000
+led_index: EMU_1_Indicator_2:1
+led_spool_index: EMU_1_Indicator_2:2
+# If using SLB board comment out the above led_index and led_spool_index and
+# uncomment the indexes below. Then comment out [AFC_led EMU_1_Indicator_2] configuration
+# section and uncomment both [AFC_led EMU_1_Indicator_Button_2] and [AFC_led EMU_1_Indicator_Box_2]
+# configuration sections.
+#led_index: EMU_1_Indicator_Button_2:1-4
+#led_spool_index: EMU_1_Indicator_Box_2:1
+prep: ^!EMU_1_lane2:TRG
+load: ^EMU_1_lane2:LOAD
+print_current: 0.4
+
+[tmc2209 AFC_stepper lane2]
+uart_pin: EMU_1_lane2:MOT_UART
+uart_address: 0
+run_current: 0.8
+sense_resistor: 0.110
+
+[AFC_button lane2]
+pin: ^!EMU_1_lane2:BUTTON
+
+[temperature_sensor lane2]
+sensor_type: BME280
+i2c_address: 118
+# If using AHT20 sensor, comment out sensor_type and i2c_address above and uncomment
+# the lines below
+#sensor_type: AHT2X
+#i2c_address: 56
+i2c_mcu: EMU_1_lane2
+i2c_software_scl_pin: EMU_1_lane2:TEMP_SCL
+i2c_software_sda_pin: EMU_1_lane2:TEMP_SCA
+# If using SLB board and would like to use hardware I2C, comment out software SCL/SDA pins
+# and uncomment i2c_bus below
+#i2c_bus: i2c2_PB10_PB11
+
+[temperature_sensor EMU_1_mcu_lane2]
+sensor_type: temperature_mcu
+sensor_mcu: EMU_1_lane2
+
+[controller_fan EMU_1_fan_lane2]
+pin: EMU_1_lane2:FAN
+max_power: 1
+kick_start_time: 0.5
+stepper: AFC_stepper lane2
+
+# Based on your configuration, LED configuration must be selected from the below:
+
+############### EBB + LED PCB ###############
+
+#[AFC_led EMU_1_Indicator_2]
+#pin: EMU_1_lane2:RGB
+#chain_count: 5
+#color_order: GRBW
+#initial_RED: 0.0
+#initial_GREEN: 0.0
+#initial_BLUE: 0.0
+#initial_WHITE: 0.0
+
+############### SLB + LED PCB ###############
+
+#[AFC_led EMU_1_Indicator_Button_2]
+#pin: EMU_1_lane2:RGB_button
+#chain_count: 4
+#color_order: GRBW
+#initial_RED: 0.0
+#initial_GREEN: 0.0
+#initial_BLUE: 0.0
+#initial_WHITE: 0.0
+
+#[AFC_led EMU_1_Indicator_Box_2]
+#pin: EMU_1_lane2:RGB_box
+#chain_count: 1
+#color_order: GRBW
+#initial_RED: 0.0
+#initial_GREEN: 0.0
+#initial_BLUE: 0.0
+#initial_WHITE: 0.0
+
+############### EBB + neopixel eject buttons ###############
+
+[AFC_led EMU_1_Indicator_2]
+pin: EMU_1_lane2:RGB
+chain_count: 2
+color_order: GRBW
+initial_RED: 0.0
+initial_GREEN: 0.0
+initial_BLUE: 0.0
+initial_WHITE: 0.0
+
+[AFC_stepper lane3]
+unit: EMU_1:3
+step_pin: EMU_1_lane3:MOT_STEP
+dir_pin: EMU_1_lane3:MOT_DIR
+enable_pin: !EMU_1_lane3:MOT_EN
+microsteps: 4
+rotation_distance: 22.7574
+gear_ratio: 1:1
+dist_hub: 2000
+led_index: EMU_1_Indicator_3:1
+led_spool_index: EMU_1_Indicator_3:2
+# If using SLB board comment out the above led_index and led_spool_index and
+# uncomment the indexes below. Then comment out [AFC_led EMU_1_Indicator_3] configuration
+# section and uncomment both [AFC_led EMU_1_Indicator_Button_3] and [AFC_led EMU_1_Indicator_Box_3]
+# configuration sections.
+#led_index: EMU_1_Indicator_Button_3:1-4
+#led_spool_index: EMU_1_Indicator_Box_3:1
+prep: ^!EMU_1_lane3:TRG
+load: ^EMU_1_lane3:LOAD
+print_current: 0.4
+
+[tmc2209 AFC_stepper lane3]
+uart_pin: EMU_1_lane3:MOT_UART
+uart_address: 0
+run_current: 0.8
+sense_resistor: 0.110
+
+[AFC_button lane3]
+pin: ^!EMU_1_lane3:BUTTON
+
+[temperature_sensor lane3]
+sensor_type: BME280
+i2c_address: 118
+# If using AHT20 sensor, comment out sensor_type and i2c_address above and uncomment
+# the lines below
+#sensor_type: AHT2X
+#i2c_address: 56
+i2c_mcu: EMU_1_lane3
+i2c_software_scl_pin: EMU_1_lane3:TEMP_SCL
+i2c_software_sda_pin: EMU_1_lane3:TEMP_SCA
+# If using SLB board and would like to use hardware I2C, comment out software SCL/SDA pins
+# and uncomment i2c_bus below
+#i2c_bus: i2c2_PB10_PB11
+
+[temperature_sensor EMU_1_mcu_lane3]
+sensor_type: temperature_mcu
+sensor_mcu: EMU_1_lane3
+
+[controller_fan EMU_1_fan_lane3]
+pin: EMU_1_lane3:FAN
+max_power: 1
+kick_start_time: 0.5
+stepper: AFC_stepper lane3
+
+# Based on your configuration, LED configuration must be selected from the below:
+
+############### EBB + LED PCB ###############
+
+#[AFC_led EMU_1_Indicator_3]
+#pin: EMU_1_lane3:RGB
+#chain_count: 5
+#color_order: GRBW
+#initial_RED: 0.0
+#initial_GREEN: 0.0
+#initial_BLUE: 0.0
+#initial_WHITE: 0.0
+
+############### SLB + LED PCB ###############
+
+#[AFC_led EMU_1_Indicator_Button_3]
+#pin: EMU_1_lane3:RGB_button
+#chain_count: 4
+#color_order: GRBW
+#initial_RED: 0.0
+#initial_GREEN: 0.0
+#initial_BLUE: 0.0
+#initial_WHITE: 0.0
+
+#[AFC_led EMU_1_Indicator_Box_3]
+#pin: EMU_1_lane3:RGB_box
+#chain_count: 1
+#color_order: GRBW
+#initial_RED: 0.0
+#initial_GREEN: 0.0
+#initial_BLUE: 0.0
+#initial_WHITE: 0.0
+
+############### EBB + neopixel eject buttons ###############
+
+[AFC_led EMU_1_Indicator_3]
+pin: EMU_1_lane3:RGB
+chain_count: 2
+color_order: GRBW
+initial_RED: 0.0
+initial_GREEN: 0.0
+initial_BLUE: 0.0
+initial_WHITE: 0.0
+
+[AFC_stepper lane4]
+unit: EMU_1:4
+step_pin: EMU_1_lane4:MOT_STEP
+dir_pin: EMU_1_lane4:MOT_DIR
+enable_pin: !EMU_1_lane4:MOT_EN
+microsteps: 4
+rotation_distance: 22.7574
+gear_ratio: 1:1
+dist_hub: 2000
+led_index: EMU_1_Indicator_4:1
+led_spool_index: EMU_1_Indicator_4:2
+# If using SLB board comment out the above led_index and led_spool_index and
+# uncomment the indexes below. Then comment out [AFC_led EMU_1_Indicator_4] configuration
+# section and uncomment both [AFC_led EMU_1_Indicator_Button_4] and [AFC_led EMU_1_Indicator_Box_4]
+# configuration sections.
+#led_index: EMU_1_Indicator_Button_4:1-4
+#led_spool_index: EMU_1_Indicator_Box_4:1
+prep: ^!EMU_1_lane4:TRG
+load: ^EMU_1_lane4:LOAD
+print_current: 0.4
+
+[tmc2209 AFC_stepper lane4]
+uart_pin: EMU_1_lane4:MOT_UART
+uart_address: 0
+run_current: 0.8
+sense_resistor: 0.110
+
+[AFC_button lane4]
+pin: ^!EMU_1_lane4:BUTTON
+
+[temperature_sensor lane4]
+sensor_type: BME280
+i2c_address: 118
+# If using AHT20 sensor, comment out sensor_type and i2c_address above and uncomment
+# the lines below
+#sensor_type: AHT2X
+#i2c_address: 56
+i2c_mcu: EMU_1_lane4
+i2c_software_scl_pin: EMU_1_lane4:TEMP_SCL
+i2c_software_sda_pin: EMU_1_lane4:TEMP_SCA
+# If using SLB board and would like to use hardware I2C, comment out software SCL/SDA pins
+# and uncomment i2c_bus below
+#i2c_bus: i2c2_PB10_PB11
+
+[temperature_sensor EMU_1_mcu_lane4]
+sensor_type: temperature_mcu
+sensor_mcu: EMU_1_lane4
+
+[controller_fan EMU_1_fan_lane4]
+pin: EMU_1_lane4:FAN
+max_power: 1
+kick_start_time: 0.5
+stepper: AFC_stepper lane4
+
+# Based on your configuration, LED configuration must be selected from the below:
+
+############### EBB + LED PCB ###############
+
+#[AFC_led EMU_1_Indicator_4]
+#pin: EMU_1_lane4:RGB
+#chain_count: 5
+#color_order: GRBW
+#initial_RED: 0.0
+#initial_GREEN: 0.0
+#initial_BLUE: 0.0
+#initial_WHITE: 0.0
+
+############### SLB + LED PCB ###############
+
+#[AFC_led EMU_1_Indicator_Button_4]
+#pin: EMU_1_lane4:RGB_button
+#chain_count: 4
+#color_order: GRBW
+#initial_RED: 0.0
+#initial_GREEN: 0.0
+#initial_BLUE: 0.0
+#initial_WHITE: 0.0
+
+#[AFC_led EMU_1_Indicator_Box_4]
+#pin: EMU_1_lane4:RGB_box
+#chain_count: 1
+#color_order: GRBW
+#initial_RED: 0.0
+#initial_GREEN: 0.0
+#initial_BLUE: 0.0
+#initial_WHITE: 0.0
+
+############### EBB + neopixel eject buttons ###############
+
+[AFC_led EMU_1_Indicator_4]
+pin: EMU_1_lane4:RGB
+chain_count: 2
+color_order: GRBW
+initial_RED: 0.0
+initial_GREEN: 0.0
+initial_BLUE: 0.0
+initial_WHITE: 0.0
+
+[AFC_stepper lane5]
+unit: EMU_1:5
+step_pin: EMU_1_lane5:MOT_STEP
+dir_pin: EMU_1_lane5:MOT_DIR
+enable_pin: !EMU_1_lane5:MOT_EN
+microsteps: 4
+rotation_distance: 22.7574
+gear_ratio: 1:1
+dist_hub: 2000
+led_index: EMU_1_Indicator_5:1
+led_spool_index: EMU_1_Indicator_5:2
+# If using SLB board comment out the above led_index and led_spool_index and
+# uncomment the indexes below. Then comment out [AFC_led EMU_1_Indicator_5] configuration
+# section and uncomment both [AFC_led EMU_1_Indicator_Button_5] and [AFC_led EMU_1_Indicator_Box_5]
+# configuration sections.
+#led_index: EMU_1_Indicator_Button_5:1-4
+#led_spool_index: EMU_1_Indicator_Box_5:1
+prep: ^!EMU_1_lane5:TRG
+load: ^EMU_1_lane5:LOAD
+print_current: 0.4
+
+[tmc2209 AFC_stepper lane5]
+uart_pin: EMU_1_lane5:MOT_UART
+uart_address: 0
+run_current: 0.8
+sense_resistor: 0.110
+
+[AFC_button lane5]
+pin: ^!EMU_1_lane5:BUTTON
+
+[temperature_sensor lane5]
+sensor_type: BME280
+i2c_address: 118
+# If using AHT20 sensor, comment out sensor_type and i2c_address above and uncomment
+# the lines below
+#sensor_type: AHT2X
+#i2c_address: 56
+i2c_mcu: EMU_1_lane5
+i2c_software_scl_pin: EMU_1_lane5:TEMP_SCL
+i2c_software_sda_pin: EMU_1_lane5:TEMP_SCA
+# If using SLB board and would like to use hardware I2C, comment out software SCL/SDA pins
+# and uncomment i2c_bus below
+#i2c_bus: i2c2_PB10_PB11
+
+[temperature_sensor EMU_1_mcu_lane5]
+sensor_type: temperature_mcu
+sensor_mcu: EMU_1_lane5
+
+[controller_fan EMU_1_fan_lane5]
+pin: EMU_1_lane5:FAN
+max_power: 1
+kick_start_time: 0.5
+stepper: AFC_stepper lane5
+
+# Based on your configuration, LED configuration must be selected from the below:
+
+############### EBB + LED PCB ###############
+
+#[AFC_led EMU_1_Indicator_5]
+#pin: EMU_1_lane5:RGB
+#chain_count: 5
+#color_order: GRBW
+#initial_RED: 0.0
+#initial_GREEN: 0.0
+#initial_BLUE: 0.0
+#initial_WHITE: 0.0
+
+############### SLB + LED PCB ###############
+
+#[AFC_led EMU_1_Indicator_Button_5]
+#pin: EMU_1_lane5:RGB_button
+#chain_count: 4
+#color_order: GRBW
+#initial_RED: 0.0
+#initial_GREEN: 0.0
+#initial_BLUE: 0.0
+#initial_WHITE: 0.0
+
+#[AFC_led EMU_1_Indicator_Box_5]
+#pin: EMU_1_lane5:RGB_box
+#chain_count: 1
+#color_order: GRBW
+#initial_RED: 0.0
+#initial_GREEN: 0.0
+#initial_BLUE: 0.0
+#initial_WHITE: 0.0
+
+############### EBB + neopixel eject buttons ###############
+
+[AFC_led EMU_1_Indicator_5]
+pin: EMU_1_lane5:RGB
+chain_count: 2
+color_order: GRBW
+initial_RED: 0.0
+initial_GREEN: 0.0
+initial_BLUE: 0.0
+initial_WHITE: 0.0
+
+[AFC_stepper lane6]
+unit: EMU_1:6
+step_pin: EMU_1_lane6:MOT_STEP
+dir_pin: EMU_1_lane6:MOT_DIR
+enable_pin: !EMU_1_lane6:MOT_EN
+microsteps: 4
+rotation_distance: 22.7574
+gear_ratio: 1:1
+dist_hub: 2000
+led_index: EMU_1_Indicator_6:1
+led_spool_index: EMU_1_Indicator_6:2
+# If using SLB board comment out the above led_index and led_spool_index and
+# uncomment the indexes below. Then comment out [AFC_led EMU_1_Indicator_6] configuration
+# section and uncomment both [AFC_led EMU_1_Indicator_Button_6] and [AFC_led EMU_1_Indicator_Box_6]
+# configuration sections.
+#led_index: EMU_1_Indicator_Button_6:1-4
+#led_spool_index: EMU_1_Indicator_Box_6:1
+prep: ^!EMU_1_lane6:TRG
+load: ^EMU_1_lane6:LOAD
+print_current: 0.4
+
+[tmc2209 AFC_stepper lane6]
+uart_pin: EMU_1_lane6:MOT_UART
+uart_address: 0
+run_current: 0.8
+sense_resistor: 0.110
+
+[AFC_button lane6]
+pin: ^!EMU_1_lane6:BUTTON
+
+[temperature_sensor lane6]
+sensor_type: BME280
+i2c_address: 118
+# If using AHT20 sensor, comment out sensor_type and i2c_address above and uncomment
+# the lines below
+#sensor_type: AHT2X
+#i2c_address: 56
+i2c_mcu: EMU_1_lane6
+i2c_software_scl_pin: EMU_1_lane6:TEMP_SCL
+i2c_software_sda_pin: EMU_1_lane6:TEMP_SCA
+# If using SLB board and would like to use hardware I2C, comment out software SCL/SDA pins
+# and uncomment i2c_bus below
+#i2c_bus: i2c2_PB10_PB11
+
+[temperature_sensor EMU_1_mcu_lane6]
+sensor_type: temperature_mcu
+sensor_mcu: EMU_1_lane6
+
+[controller_fan EMU_1_fan_lane6]
+pin: EMU_1_lane6:FAN
+max_power: 1
+kick_start_time: 0.5
+stepper: AFC_stepper lane6
+
+# Based on your configuration, LED configuration must be selected from the below:
+
+############### EBB + LED PCB ###############
+
+#[AFC_led EMU_1_Indicator_6]
+#pin: EMU_1_lane6:RGB
+#chain_count: 5
+#color_order: GRBW
+#initial_RED: 0.0
+#initial_GREEN: 0.0
+#initial_BLUE: 0.0
+#initial_WHITE: 0.0
+
+############### SLB + LED PCB ###############
+
+#[AFC_led EMU_1_Indicator_Button_6]
+#pin: EMU_1_lane6:RGB_button
+#chain_count: 4
+#color_order: GRBW
+#initial_RED: 0.0
+#initial_GREEN: 0.0
+#initial_BLUE: 0.0
+#initial_WHITE: 0.0
+
+#[AFC_led EMU_1_Indicator_Box_6]
+#pin: EMU_1_lane6:RGB_box
+#chain_count: 1
+#color_order: GRBW
+#initial_RED: 0.0
+#initial_GREEN: 0.0
+#initial_BLUE: 0.0
+#initial_WHITE: 0.0
+
+############### EBB + neopixel eject buttons ###############
+
+[AFC_led EMU_1_Indicator_6]
+pin: EMU_1_lane6:RGB
+chain_count: 2
+color_order: GRBW
+initial_RED: 0.0
+initial_GREEN: 0.0
+initial_BLUE: 0.0
+initial_WHITE: 0.0
+
+[AFC_stepper lane7]
+unit: EMU_1:7
+step_pin: EMU_1_lane7:MOT_STEP
+dir_pin: EMU_1_lane7:MOT_DIR
+enable_pin: !EMU_1_lane7:MOT_EN
+microsteps: 4
+rotation_distance: 22.7574
+gear_ratio: 1:1
+dist_hub: 2000
+led_index: EMU_1_Indicator_7:1
+led_spool_index: EMU_1_Indicator_7:2
+# If using SLB board comment out the above led_index and led_spool_index and
+# uncomment the indexes below. Then comment out [AFC_led EMU_1_Indicator_7] configuration
+# section and uncomment both [AFC_led EMU_1_Indicator_Button_7] and [AFC_led EMU_1_Indicator_Box_7]
+# configuration sections.
+#led_index: EMU_1_Indicator_Button_7:1-4
+#led_spool_index: EMU_1_Indicator_Box_7:1
+prep: ^!EMU_1_lane7:TRG
+load: ^EMU_1_lane7:LOAD
+print_current: 0.4
+
+[tmc2209 AFC_stepper lane7]
+uart_pin: EMU_1_lane7:MOT_UART
+uart_address: 0
+run_current: 0.8
+sense_resistor: 0.110
+
+[AFC_button lane7]
+pin: ^!EMU_1_lane7:BUTTON
+
+[temperature_sensor lane7]
+sensor_type: BME280
+i2c_address: 118
+# If using AHT20 sensor, comment out sensor_type and i2c_address above and uncomment
+# the lines below
+#sensor_type: AHT2X
+#i2c_address: 56
+i2c_mcu: EMU_1_lane7
+i2c_software_scl_pin: EMU_1_lane7:TEMP_SCL
+i2c_software_sda_pin: EMU_1_lane7:TEMP_SCA
+# If using SLB board and would like to use hardware I2C, comment out software SCL/SDA pins
+# and uncomment i2c_bus below
+#i2c_bus: i2c2_PB10_PB11
+
+[temperature_sensor EMU_1_mcu_lane7]
+sensor_type: temperature_mcu
+sensor_mcu: EMU_1_lane7
+
+[controller_fan EMU_1_fan_lane7]
+pin: EMU_1_lane7:FAN
+max_power: 1
+kick_start_time: 0.5
+stepper: AFC_stepper lane7
+
+# Based on your configuration, LED configuration must be selected from the below:
+
+############### EBB + LED PCB ###############
+
+#[AFC_led EMU_1_Indicator_7]
+#pin: EMU_1_lane7:RGB
+#chain_count: 5
+#color_order: GRBW
+#initial_RED: 0.0
+#initial_GREEN: 0.0
+#initial_BLUE: 0.0
+#initial_WHITE: 0.0
+
+############### SLB + LED PCB ###############
+
+#[AFC_led EMU_1_Indicator_Button_7]
+#pin: EMU_1_lane7:RGB_button
+#chain_count: 4
+#color_order: GRBW
+#initial_RED: 0.0
+#initial_GREEN: 0.0
+#initial_BLUE: 0.0
+#initial_WHITE: 0.0
+
+#[AFC_led EMU_1_Indicator_Box_7]
+#pin: EMU_1_lane7:RGB_box
+#chain_count: 1
+#color_order: GRBW
+#initial_RED: 0.0
+#initial_GREEN: 0.0
+#initial_BLUE: 0.0
+#initial_WHITE: 0.0
+
+############### EBB + neopixel eject buttons ###############
+
+[AFC_led EMU_1_Indicator_7]
+pin: EMU_1_lane7:RGB
+chain_count: 2
+color_order: GRBW
+initial_RED: 0.0
+initial_GREEN: 0.0
+initial_BLUE: 0.0
+initial_WHITE: 0.0
+
+[AFC_stepper lane8]
+unit: EMU_1:8
+step_pin: EMU_1_lane8:MOT_STEP
+dir_pin: EMU_1_lane8:MOT_DIR
+enable_pin: !EMU_1_lane8:MOT_EN
+microsteps: 4
+rotation_distance: 22.7574
+gear_ratio: 1:1
+dist_hub: 2000
+led_index: EMU_1_Indicator_8:1
+led_spool_index: EMU_1_Indicator_8:2
+# If using SLB board comment out the above led_index and led_spool_index and
+# uncomment the indexes below. Then comment out [AFC_led EMU_1_Indicator_8] configuration
+# section and uncomment both [AFC_led EMU_1_Indicator_Button_8] and [AFC_led EMU_1_Indicator_Box_8]
+# configuration sections.
+#led_index: EMU_1_Indicator_Button_8:1-4
+#led_spool_index: EMU_1_Indicator_Box_8:1
+prep: ^!EMU_1_lane8:TRG
+load: ^EMU_1_lane8:LOAD
+print_current: 0.4
+
+[tmc2209 AFC_stepper lane8]
+uart_pin: EMU_1_lane8:MOT_UART
+uart_address: 0
+run_current: 0.8
+sense_resistor: 0.110
+
+[AFC_button lane8]
+pin: ^!EMU_1_lane8:BUTTON
+
+[temperature_sensor lane8]
+sensor_type: BME280
+i2c_address: 118
+# If using AHT20 sensor, comment out sensor_type and i2c_address above and uncomment
+# the lines below
+#sensor_type: AHT2X
+#i2c_address: 56
+i2c_mcu: EMU_1_lane8
+i2c_software_scl_pin: EMU_1_lane8:TEMP_SCL
+i2c_software_sda_pin: EMU_1_lane8:TEMP_SCA
+# If using SLB board and would like to use hardware I2C, comment out software SCL/SDA pins
+# and uncomment i2c_bus below
+#i2c_bus: i2c2_PB10_PB11
+
+[temperature_sensor EMU_1_mcu_lane8]
+sensor_type: temperature_mcu
+sensor_mcu: EMU_1_lane8
+
+[controller_fan EMU_1_fan_lane8]
+pin: EMU_1_lane8:FAN
+max_power: 1
+kick_start_time: 0.5
+stepper: AFC_stepper lane8
+
+# Based on your configuration, LED configuration must be selected from the below:
+
+############### EBB + LED PCB ###############
+
+#[AFC_led EMU_1_Indicator_8]
+#pin: EMU_1_lane8:RGB
+#chain_count: 5
+#color_order: GRBW
+#initial_RED: 0.0
+#initial_GREEN: 0.0
+#initial_BLUE: 0.0
+#initial_WHITE: 0.0
+
+############### SLB + LED PCB ###############
+
+#[AFC_led EMU_1_Indicator_Button_8]
+#pin: EMU_1_lane8:RGB_button
+#chain_count: 4
+#color_order: GRBW
+#initial_RED: 0.0
+#initial_GREEN: 0.0
+#initial_BLUE: 0.0
+#initial_WHITE: 0.0
+
+#[AFC_led EMU_1_Indicator_Box_8]
+#pin: EMU_1_lane8:RGB_box
+#chain_count: 1
+#color_order: GRBW
+#initial_RED: 0.0
+#initial_GREEN: 0.0
+#initial_BLUE: 0.0
+#initial_WHITE: 0.0
+
+############### EBB + neopixel eject buttons ###############
+
+[AFC_led EMU_1_Indicator_8]
+pin: EMU_1_lane8:RGB
+chain_count: 2
+color_order: GRBW
+initial_RED: 0.0
+initial_GREEN: 0.0
+initial_BLUE: 0.0
+initial_WHITE: 0.0
+
+[AFC_buffer EMU_1_buffer]
+advance_pin: ^EMU_1_lane1:BUFFER_ADV
+trailing_pin: ^EMU_1_lane1:BUFFER_TRL
+multiplier_high: 1.15
+multiplier_low: 0.90
+
+# EMU hub defaults to virtual (no sensor). To use a physical hub sensor:
+#  - Replace "virtual" with the actual sensor pin
+#  - Update dist_hub in each AFC_stepper section to the PTFE length between
+#    the load sensor and hub sensor
+#  - Remove/comment out the `use_dist_hub: True` line
+[AFC_hub EMU_1_HUB]
+afc_bowden_length: 2000
+hub_clear_move_dis: 5
+switch_pin: virtual
+use_dist_hub: True
+--- end AFC_EMU_1.cfg ---
+--- AFC_Hardware.cfg ---
+[force_move]
+enable_force_move: True
+
+[AFC_extruder extruder]
+pin_tool_start: enter_tool_pin
+#pin_tool_end: None
+tool_stn: 72                    # See documentation for details on how to calculate this value. https://www.afcproject.dev/toolhead/calculation.html
+tool_stn_unload: 100            # See documentation for details on how to calculate this value. https://www.afcproject.dev/toolhead/calculation.html
+tool_sensor_after_extruder: 0   # Extra distance to move in mm once pre/post sensors are clear. Useful for when only using post sensor, so this distance can be the amount to move to clear extruder gears
+tool_unload_speed: 25           # Unload speed in mm/s when unloading toolhead. Default is 25mm/s.
+tool_load_speed: 25             # Load speed in mm/s when loading toolhead. Default is 25mm/s.
+
+#[filament_switch_sensor bypass]
+#switch_pin: turtleneck:PB5
+#pause_on_runout: False
+
+#--=================================================================================--#
+######### Tip Cut Servo ###############################################################
+#--=================================================================================--#
+#[servo tool_cut]
+# Pin for the cut pin servo.
+#pin: YOUR_SERVO_PIN_HERE
+# Adjust this value until a '_CUTTER_SERVO POS=out' extends the pin fully without a
+# buzzing sound
+#minimum_pulse_width: 0.00053
+# Adjust this value until a '_CUTTER_SERVO POS=in' retracts the pin fully without a
+# buzzing sound
+#maximum_pulse_width: 0.0023
+# Leave this value at 180
+#maximum_servo_angle: 180
+#   Initial angle (in degrees) to set the servo to. The default is to
+#   not send any signal at startup.
+--- end AFC_Hardware.cfg ---
+--- mcu/EMU_1.cfg ---
+[board_pins EMU_1]
+mcu: EMU_1_lane1, EMU_1_lane2, EMU_1_lane3, EMU_1_lane4, EMU_1_lane5, EMU_1_lane6, EMU_1_lane7, EMU_1_lane8
+aliases:
+    MOT_UART=PA15,
+    MOT_STEP=PD0,
+    MOT_DIR=PD1,
+    MOT_EN=PD2,
+    MOT_DIAG=,
+
+    RGB=PD3,
+
+    TRG=PB7,
+    LOAD=PB5,
+
+    BUFFER_ADV=PB8,
+    BUFFER_TRL=PB9,
+
+    TH=PA3,
+
+    FAN=PA0,
+
+    BUTTON=PB6,
+
+    TEMP_SCL=PB3,
+    TEMP_SCA=PB4
+--- end mcu/EMU_1.cfg ---

@@ -1,0 +1,4 @@
+=== OUTPUT ===
+C. EMU Name : Foo_1 
+G. EMU Lane Count : 3 
+H. EMU Board Type : EBB 

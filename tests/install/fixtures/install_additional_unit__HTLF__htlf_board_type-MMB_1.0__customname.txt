@@ -1,0 +1,122 @@
+=== FILES ===
+--- AFC_MMB_CustomName2.cfg ---
+[include mcu/HTLF_MMB*.cfg]
+
+[mcu MMB_HTLF]
+canbus_uuid: <enter_canbus_uuid>
+#serial: <enter_serial_device>
+
+[temperature_sensor MMB_HTLF]
+sensor_type: temperature_mcu
+sensor_mcu: MMB_HTLF
+
+[AFC_HTLF CustomName2]
+hub: CustomName2
+extruder: extruder
+buffer: TurtleNeck
+drive_stepper: HTLF_Drive
+selector_stepper: HTLF_Selector
+home_pin: MMB_HTLF:HOME_POS
+cam_angle: 60                   # Which cam lobe is being used 30,45,60
+MAX_ANGLE_MOVEMENT:220
+# mm_move_per_rotation is how many mm's it takes to do a full rotation
+# mm_move_per_rotation: 32      # Uncomment if using 16T gear and comment out 20T line
+mm_move_per_rotation: 40        # 20T
+long_moves_speed:150
+long_moves_accel:50
+
+[AFC_stepper HTLF_Drive]
+unit: CustomName2
+step_pin: MMB_HTLF:M1_STEP
+dir_pin: !MMB_HTLF:M1_DIR
+enable_pin: !MMB_HTLF:M1_EN
+microsteps: 16
+# rotation_distance: 28.8       # Uncomment if using 16T gear and comment out 20T line, Calibrate for your setup
+# gear_ratio: 80:16             # 16T
+rotation_distance: 23.4624      # 20T, Calibrate for your setup
+gear_ratio: 80:20               # 20T
+
+[tmc2209 AFC_stepper HTLF_Drive]
+uart_pin: MMB_HTLF:M1_UART
+uart_address: 0
+run_current: 0.8
+sense_resistor: 0.110
+
+[AFC_stepper HTLF_Selector]
+unit: CustomName2
+step_pin: MMB_HTLF:M2_STEP
+dir_pin: !MMB_HTLF:M2_DIR
+enable_pin: !MMB_HTLF:M2_EN
+microsteps: 16
+# rotation_distance: 40        # Uncomment if using 16T gear and comment out 20T line
+# gear_ratio: 80:16            # 16T
+rotation_distance: 40          # 20T
+gear_ratio: 80:20              # 20T
+
+[tmc2209 AFC_stepper HTLF_Selector]
+uart_pin: MMB_HTLF:M2_UART
+uart_address: 0
+run_current: 0.8
+hold_current: 0.6
+sense_resistor: 0.110
+
+[AFC_lane lane1]
+unit: CustomName2:1
+dist_hub: 100
+led_index: AFC_Indicator_CustomName2:1
+load: !MMB_HTLF:LOAD1
+
+[AFC_lane lane2]
+unit: CustomName2:2
+dist_hub: 100
+led_index: AFC_Indicator_CustomName2:2
+load: !MMB_HTLF:LOAD2
+
+[AFC_lane lane3]
+unit: CustomName2:3
+dist_hub: 100
+led_index: AFC_Indicator_CustomName2:3
+load: !MMB_HTLF:LOAD3
+
+[AFC_lane lane4]
+unit: CustomName2:4
+dist_hub: 100
+led_index: AFC_Indicator_CustomName2:4
+load: !MMB_HTLF:LOAD4
+
+[AFC_hub CustomName2]
+afc_bowden_length: 1750        # Length of the Bowden tube from the hub to the toolhead sensor in mm.
+move_dis: 75                   # Distance to move the filament within the hub in mm.
+hub_clear_move_dis: 65
+switch_pin: ^MMB_HTLF:HUB
+
+[AFC_led AFC_Indicator_CustomName2]
+pin: MMB_HTLF:RGB1
+chain_count: 4
+color_order: GRBW
+initial_RED: 0.0
+initial_GREEN: 0.0
+initial_BLUE: 0.0
+initial_WHITE: 0.0--- end AFC_MMB_CustomName2.cfg ---
+--- AFC_Turtle_1.cfg ---
+placeholder
+--- end AFC_Turtle_1.cfg ---
+--- mcu/HTLF_MMB_1.0.cfg ---
+[board_pins mmb_1.0_htlf]
+mcu: MMB_HTLF
+aliases:
+    M1_STEP=PB15   , M1_DIR=PB14   , M1_EN=PA8    , M1_UART=PA10   , # M1_DIAG=PA3   ,
+    M2_STEP=PD2    , M2_DIR=PB13   , M2_EN=PD1    , M2_UART=PC7    , # M2_DIAG=PA4   ,
+    M3_STEP=PD0    , M3_DIR=PD3    , M3_EN=PA15   , M3_UART=PC6    , # M3_DIAG=PB9   ,
+    M4_STEP=PB6    , M4_DIR=PB7    , M4_EN=PB5    , M4_UART=PA9    , # M3_DIAG=PB8   ,
+
+    HUB=PC13         ,
+    HOME_POS=PA3   ,
+    LOAD1=PA4         , LOAD2=PB9        , LOAD3=PB8      , LOAD4=PC15        , # LOAD3=PA8 => PB8
+    SPARE1=PC14    , SPARE2=PB12   , SPARE3=PA0   ,
+    SPARE5=PB3     , SPARE6=PB4    , SPARE7=PB11  , SPARE8=PB10    ,
+    SPARE9=PB2     ,
+
+    RGB1=PA2       ,
+    
+    PSF=PA1,--- end mcu/HTLF_MMB_1.0.cfg ---

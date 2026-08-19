@@ -1,0 +1,6 @@
+=== VARS ===
+buffer_unit_name=Turtle_1
+buffer_unit_section_prefix=AFC_Claymore
+buffer_extruder_file=AFC_Turtle_1.cfg
+buffer_section_name=Claymore_buffer
+buffer_prebaked_header=[AFC_buffer Claymore_buffer]

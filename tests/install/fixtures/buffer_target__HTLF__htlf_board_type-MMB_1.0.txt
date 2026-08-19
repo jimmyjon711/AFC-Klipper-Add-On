@@ -1,0 +1,6 @@
+=== VARS ===
+buffer_unit_name=HTLF_1
+buffer_unit_section_prefix=AFC_HTLF
+buffer_extruder_file=AFC_MMB_Turtle_1.cfg
+buffer_section_name=HTLF_1
+buffer_prebaked_header=

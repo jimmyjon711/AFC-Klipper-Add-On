@@ -1,0 +1,6 @@
+=== OUTPUT ===
+1. EMU Name: EMU_1 
+G. EMU Lane Count : 3 
+H. EMU Board Type : EBB 
+=== VARS ===
+boxturtle_name=EMU_1

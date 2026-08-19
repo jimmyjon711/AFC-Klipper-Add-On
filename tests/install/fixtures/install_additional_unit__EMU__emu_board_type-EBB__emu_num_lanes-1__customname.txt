@@ -1,0 +1,165 @@
+=== FILES ===
+--- AFC_CustomName2.cfg ---
+[include mcu/CustomName2.cfg]
+
+[mcu CustomName2_lane1]
+canbus_uuid: <replace with your can UUID>
+#canbus_interface: can1         # Uncomment if using a CAN bus other than can0
+#serial: <replace with your /dev/serial/by-id/...> and comment out canbus_uuid above
+
+[AFC_EMU CustomName2]
+hub: CustomName2_HUB
+extruder: extruder
+buffer: CustomName2_buffer
+# The following speeds below are conservative, speeds have been tested up to 500mm/s, recommended
+# running speeds at 400mm/s or less.
+long_moves_speed: 250
+long_moves_accel: 120
+#long_moves_speed: 300
+#long_moves_accel: 300
+
+[AFC_stepper lane1]
+unit: CustomName2:1
+step_pin: CustomName2_lane1:MOT_STEP
+dir_pin: CustomName2_lane1:MOT_DIR
+enable_pin: !CustomName2_lane1:MOT_EN
+microsteps: 4
+rotation_distance: 22.7574
+gear_ratio: 1:1
+dist_hub: 2000
+led_index: CustomName2_Indicator_1:1
+led_spool_index: CustomName2_Indicator_1:2
+# If using SLB board comment out the above led_index and led_spool_index and
+# uncomment the indexes below. Then comment out [AFC_led CustomName2_Indicator_1] configuration
+# section and uncomment both [AFC_led CustomName2_Indicator_Button_1] and [AFC_led CustomName2_Indicator_Box_1]
+# configuration sections.
+#led_index: CustomName2_Indicator_Button_1:1-4
+#led_spool_index: CustomName2_Indicator_Box_1:1
+prep: ^!CustomName2_lane1:TRG
+load: ^CustomName2_lane1:LOAD
+print_current: 0.4
+
+[tmc2209 AFC_stepper lane1]
+uart_pin: CustomName2_lane1:MOT_UART
+uart_address: 0
+run_current: 0.8
+sense_resistor: 0.110
+
+[AFC_button lane1]
+pin: ^!CustomName2_lane1:BUTTON
+
+[temperature_sensor lane1]
+sensor_type: BME280
+i2c_address: 118
+# If using AHT20 sensor, comment out sensor_type and i2c_address above and uncomment
+# the lines below
+#sensor_type: AHT2X
+#i2c_address: 56
+i2c_mcu: CustomName2_lane1
+i2c_software_scl_pin: CustomName2_lane1:TEMP_SCL
+i2c_software_sda_pin: CustomName2_lane1:TEMP_SCA
+# If using SLB board and would like to use hardware I2C, comment out software SCL/SDA pins
+# and uncomment i2c_bus below
+#i2c_bus: i2c2_PB10_PB11
+
+[temperature_sensor CustomName2_mcu_lane1]
+sensor_type: temperature_mcu
+sensor_mcu: CustomName2_lane1
+
+[controller_fan CustomName2_fan_lane1]
+pin: CustomName2_lane1:FAN
+max_power: 1
+kick_start_time: 0.5
+stepper: AFC_stepper lane1
+
+# Based on your configuration, LED configuration must be selected from the below:
+
+############### EBB + LED PCB ###############
+
+#[AFC_led CustomName2_Indicator_1]
+#pin: CustomName2_lane1:RGB
+#chain_count: 5
+#color_order: GRBW
+#initial_RED: 0.0
+#initial_GREEN: 0.0
+#initial_BLUE: 0.0
+#initial_WHITE: 0.0
+
+############### SLB + LED PCB ###############
+
+#[AFC_led CustomName2_Indicator_Button_1]
+#pin: CustomName2_lane1:RGB_button
+#chain_count: 4
+#color_order: GRBW
+#initial_RED: 0.0
+#initial_GREEN: 0.0
+#initial_BLUE: 0.0
+#initial_WHITE: 0.0
+
+#[AFC_led CustomName2_Indicator_Box_1]
+#pin: CustomName2_lane1:RGB_box
+#chain_count: 1
+#color_order: GRBW
+#initial_RED: 0.0
+#initial_GREEN: 0.0
+#initial_BLUE: 0.0
+#initial_WHITE: 0.0
+
+############### EBB + neopixel eject buttons ###############
+
+[AFC_led CustomName2_Indicator_1]
+pin: CustomName2_lane1:RGB
+chain_count: 2
+color_order: GRBW
+initial_RED: 0.0
+initial_GREEN: 0.0
+initial_BLUE: 0.0
+initial_WHITE: 0.0
+
+[AFC_buffer CustomName2_buffer]
+advance_pin: ^CustomName2_lane1:BUFFER_ADV
+trailing_pin: ^CustomName2_lane1:BUFFER_TRL
+multiplier_high: 1.15
+multiplier_low: 0.90
+
+# EMU hub defaults to virtual (no sensor). To use a physical hub sensor:
+#  - Replace "virtual" with the actual sensor pin
+#  - Update dist_hub in each AFC_stepper section to the PTFE length between
+#    the load sensor and hub sensor
+#  - Remove/comment out the `use_dist_hub: True` line
+[AFC_hub CustomName2_HUB]
+afc_bowden_length: 2000
+hub_clear_move_dis: 5
+switch_pin: virtual
+use_dist_hub: True
+--- end AFC_CustomName2.cfg ---
+--- AFC_Turtle_1.cfg ---
+placeholder
+--- end AFC_Turtle_1.cfg ---
+--- mcu/CustomName2.cfg ---
+[board_pins CustomName2]
+mcu: CustomName2_lane1
+aliases:
+    MOT_UART=PA15,
+    MOT_STEP=PD0,
+    MOT_DIR=PD1,
+    MOT_EN=PD2,
+    MOT_DIAG=,
+
+    RGB=PD3,
+
+    TRG=PB7,
+    LOAD=PB5,
+
+    BUFFER_ADV=PB8,
+    BUFFER_TRL=PB9,
+
+    TH=PA3,
+
+    FAN=PA0,
+
+    BUTTON=PB6,
+
+    TEMP_SCL=PB3,
+    TEMP_SCA=PB4
+--- end mcu/CustomName2.cfg ---

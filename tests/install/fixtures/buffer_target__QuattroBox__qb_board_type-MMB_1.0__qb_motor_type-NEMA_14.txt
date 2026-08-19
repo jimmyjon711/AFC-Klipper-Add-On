@@ -1,0 +1,6 @@
+=== VARS ===
+buffer_unit_name=QuattroBox_1
+buffer_unit_section_prefix=AFC_QuattroBox
+buffer_extruder_file=AFC_QuattroBox_1.cfg
+buffer_section_name=QuattroBox_1
+buffer_prebaked_header=[AFC_buffer QuattroBox_1]

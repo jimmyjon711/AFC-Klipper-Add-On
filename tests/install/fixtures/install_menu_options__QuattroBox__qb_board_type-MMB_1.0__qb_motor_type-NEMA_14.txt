@@ -1,0 +1,3 @@
+=== OUTPUT ===
+E. QuattroBox Board Type : MMB_1.0 
+F. QuattroBox Motor Type : NEMA_14 

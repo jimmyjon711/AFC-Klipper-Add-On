@@ -1,0 +1,5 @@
+=== OUTPUT ===
+1. Claymore Name: Claymore_1 
+H. Claymore Board Type : AFC_Lite 
+=== VARS ===
+boxturtle_name=Claymore_1

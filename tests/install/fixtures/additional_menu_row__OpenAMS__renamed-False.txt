@@ -1,0 +1,4 @@
+=== OUTPUT ===
+1. OpenAMS Name: AMS_1 
+=== VARS ===
+boxturtle_name=AMS_1

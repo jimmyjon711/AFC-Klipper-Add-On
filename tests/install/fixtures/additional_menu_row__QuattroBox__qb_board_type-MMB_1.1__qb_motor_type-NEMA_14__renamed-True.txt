@@ -1,0 +1,6 @@
+=== OUTPUT ===
+1. QuattroBox Name: Foo_1 
+E. QuattroBox Board Type : MMB_1.1 
+F. QuattroBox Motor Type : NEMA_14 
+=== VARS ===
+boxturtle_name=Foo_1

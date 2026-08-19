@@ -1,0 +1,3 @@
+=== OUTPUT ===
+C. Claymore Name : Foo_1 
+H. Claymore Board Type : AFC_Lite 

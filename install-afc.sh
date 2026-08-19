@@ -40,7 +40,9 @@ if [[ -n "${_requested_branch}" && -d "${SCRIPT_DIR}/.git" ]]; then
   fi
 fi
 
+source include/units/registry.sh
 source include/constants.sh
+source include/menus/unit_art.sh
 
 # Menu functions
 source include/menus/main_menu.sh

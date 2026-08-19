@@ -1,0 +1,302 @@
+=== FILES ===
+--- AFC_Turtle_1.cfg ---
+placeholder
+--- end AFC_Turtle_1.cfg ---
+--- AFC_Turtle_2.cfg ---
+[include mcu/AFC_Turtle_2_mcu.cfg]
+
+[mcu Turtle_2]
+canbus_uuid: <replace with your can UUID>
+#serial: <replace with your /dev/serial/by-id/...> and comment out canbus_uuid above
+
+[AFC_BoxTurtle Turtle_2]
+hub: Turtle_2
+extruder: extruder
+# buffer: <buffer_name> # If not defined below from the install script, uncomment and add buffer name if using a buffer
+
+[temperature_sensor Turtle_2]
+sensor_type: temperature_mcu
+sensor_mcu: Turtle_2
+
+[AFC_stepper lane1]
+unit: Turtle_2:1
+step_pin: Turtle_2:M1_STEP
+dir_pin: !Turtle_2:M1_DIR
+enable_pin: !Turtle_2:M1_EN
+microsteps: 16
+rotation_distance: 4.65
+dist_hub: 155.0
+park_dist: 10
+led_index: AFC_Indicator:1
+afc_motor_rwd: Turtle_2:MOT1_RWD
+afc_motor_fwd: Turtle_2:MOT1_FWD
+afc_motor_enb: Turtle_2:MOT1_EN
+rwd_speed_multiplier: 0.5
+fwd_speed_multiplier: 0.5
+pwm: True
+prep: ^!Turtle_2:TRG1
+load: ^Turtle_2:EXT1
+
+[tmc2209 AFC_stepper lane1]
+uart_pin: Turtle_2:M1_UART
+uart_address: 0
+run_current: 0.8
+sense_resistor: 0.110
+
+[AFC_stepper lane2]
+unit: Turtle_2:2
+step_pin: Turtle_2:M2_STEP
+dir_pin: !Turtle_2:M2_DIR
+enable_pin: !Turtle_2:M2_EN
+microsteps: 16
+rotation_distance: 4.65
+dist_hub: 80
+park_dist: 10
+led_index: AFC_Indicator:2
+afc_motor_rwd: Turtle_2:MOT2_RWD
+afc_motor_fwd: Turtle_2:MOT2_FWD
+afc_motor_enb: Turtle_2:MOT2_EN
+rwd_speed_multiplier: 0.5
+fwd_speed_multiplier: 0.5
+pwm: True
+prep: ^!Turtle_2:TRG2
+load: ^Turtle_2:EXT2
+
+[tmc2209 AFC_stepper lane2]
+uart_pin: Turtle_2:M2_UART
+uart_address: 0
+run_current: 0.8
+sense_resistor: 0.110
+
+[AFC_stepper lane3]
+unit: Turtle_2:3
+step_pin: Turtle_2:M3_STEP
+dir_pin: !Turtle_2:M3_DIR
+enable_pin: !Turtle_2:M3_EN
+microsteps: 16
+rotation_distance: 4.65
+dist_hub: 90.0
+park_dist: 10
+led_index: AFC_Indicator:3
+afc_motor_rwd: Turtle_2:MOT3_RWD
+afc_motor_fwd: Turtle_2:MOT3_FWD
+afc_motor_enb: Turtle_2:MOT3_EN
+rwd_speed_multiplier: 0.5
+fwd_speed_multiplier: 0.5
+pwm: True
+prep: ^!Turtle_2:TRG3
+load: ^Turtle_2:EXT3
+
+[tmc2209 AFC_stepper lane3]
+uart_pin: Turtle_2:M3_UART
+uart_address: 0
+run_current: 0.8
+sense_resistor: 0.110
+
+[AFC_stepper lane4]
+unit: Turtle_2:4
+step_pin: Turtle_2:M4_STEP
+dir_pin: !Turtle_2:M4_DIR
+enable_pin: !Turtle_2:M4_EN
+microsteps: 16
+rotation_distance: 4.65
+dist_hub: 145.0
+park_dist: 10
+led_index: AFC_Indicator:4
+afc_motor_rwd: Turtle_2:MOT4_RWD
+afc_motor_fwd: Turtle_2:MOT4_FWD
+afc_motor_enb: Turtle_2:MOT4_EN
+rwd_speed_multiplier: 0.5
+fwd_speed_multiplier: 0.5
+pwm: True
+prep: ^!Turtle_2:TRG4
+load: ^Turtle_2:EXT4
+
+[tmc2209 AFC_stepper lane4]
+uart_pin: Turtle_2:M4_UART
+uart_address: 0
+run_current: 0.8
+sense_resistor: 0.110
+
+[AFC_stepper lane5]
+unit: Turtle_2:5
+step_pin: Turtle_2:M5_STEP
+dir_pin: !Turtle_2:M5_DIR
+enable_pin: !Turtle_2:M5_EN
+microsteps: 16
+rotation_distance: 4.65
+dist_hub: 155.0
+park_dist: 10
+led_index: AFC_Indicator:5
+afc_motor_rwd: Turtle_2:MOT5_RWD
+afc_motor_fwd: Turtle_2:MOT5_FWD
+afc_motor_enb: Turtle_2:MOT5_EN
+rwd_speed_multiplier: 0.5
+fwd_speed_multiplier: 0.5
+pwm: True
+prep: ^!Turtle_2:TRG5
+load: ^Turtle_2:EXT5
+
+[tmc2209 AFC_stepper lane5]
+uart_pin: Turtle_2:M5_UART
+uart_address: 0
+run_current: 0.8
+sense_resistor: 0.110
+
+[AFC_stepper lane6]
+unit: Turtle_2:6
+step_pin: Turtle_2:M6_STEP
+dir_pin: !Turtle_2:M6_DIR
+enable_pin: !Turtle_2:M6_EN
+microsteps: 16
+rotation_distance: 4.65
+dist_hub: 80
+park_dist: 10
+led_index: AFC_Indicator:6
+afc_motor_rwd: Turtle_2:MOT6_RWD
+afc_motor_fwd: Turtle_2:MOT6_FWD
+afc_motor_enb: Turtle_2:MOT6_EN
+rwd_speed_multiplier: 0.5
+fwd_speed_multiplier: 0.5
+pwm: True
+prep: ^!Turtle_2:TRG6
+load: ^Turtle_2:EXT6
+
+[tmc2209 AFC_stepper lane6]
+uart_pin: Turtle_2:M6_UART
+uart_address: 0
+run_current: 0.8
+sense_resistor: 0.110
+
+[AFC_stepper lane7]
+unit: Turtle_2:7
+step_pin: Turtle_2:M7_STEP
+dir_pin: !Turtle_2:M7_DIR
+enable_pin: !Turtle_2:M7_EN
+microsteps: 16
+rotation_distance: 4.65
+dist_hub: 90.0
+park_dist: 10
+led_index: AFC_Indicator:7
+afc_motor_rwd: Turtle_2:MOT7_RWD
+afc_motor_fwd: Turtle_2:MOT7_FWD
+afc_motor_enb: Turtle_2:MOT7_EN
+rwd_speed_multiplier: 0.5
+fwd_speed_multiplier: 0.5
+pwm: True
+prep: ^!Turtle_2:TRG7
+load: ^Turtle_2:EXT7
+
+[tmc2209 AFC_stepper lane7]
+uart_pin: Turtle_2:M7_UART
+uart_address: 0
+run_current: 0.8
+sense_resistor: 0.110
+
+[AFC_stepper lane8]
+unit: Turtle_2:8
+step_pin: Turtle_2:M8_STEP
+dir_pin: !Turtle_2:M8_DIR
+enable_pin: !Turtle_2:M8_EN
+microsteps: 16
+rotation_distance: 4.65
+dist_hub: 145.0
+park_dist: 10
+led_index: AFC_Indicator:8
+afc_motor_rwd: Turtle_2:MOT8_RWD
+afc_motor_fwd: Turtle_2:MOT8_FWD
+afc_motor_enb: Turtle_2:MOT8_EN
+rwd_speed_multiplier: 0.5
+fwd_speed_multiplier: 0.5
+pwm: True
+prep: ^!Turtle_2:TRG8
+load: ^Turtle_2:EXT8
+
+[tmc2209 AFC_stepper lane8]
+uart_pin: Turtle_2:M8_UART
+uart_address: 0
+run_current: 0.8
+sense_resistor: 0.110
+
+[AFC_hub Turtle_2]
+switch_pin: ^Turtle_2:HUB   # Pin for the hub switch
+afc_bowden_length: 1725     # Length of the Bowden tube from the hub to the toolhead sensor in mm.
+move_dis: 75                # Distance to move the filament within the hub in mm.
+#hub_clear_move_dis: 65     # Distance after hub switch becomes fast to retract to insure hub is clear
+cut: False                  # Hub cutter installed (e.g. Snappy)
+
+#--=================================================================================--#
+######### Hub Cut #####################################################################
+#--=================================================================================--#
+assisted_retract: False     # If True, retracts are assisted to prevent loose windows on the spool
+cut_cmd: AFC #CMD to use
+cut_dist: 50                # How much filament to cut off (in mm).
+cut_clear: 120              # How far the filament should retract back from the hub (in mm).
+cut_min_length: 300.0
+cut_servo_pass_angle: 10    # Servo angle to align the Bowden tube with the hole for loading the toolhead.
+cut_servo_clip_angle: 180   # Servo angle for cutting the filament.
+cut_servo_prep_angle: 80    # Servo angle to prepare the filament for cutting (aligning the exit hole).
+
+#[AFC_screen Turtle_2]
+#mac_address: None
+
+[AFC_led AFC_Indicator]
+pin: Turtle_2:RGB1
+chain_count: 8
+color_order: GRBW
+
+#[neopixel Extra2]
+#pin: Turtle_2:RGB2
+#chain_count: 6
+#color_order: GRB
+
+#[neopixel Extra3]
+#pin: Turtle_2:RGB3
+#chain_count: 6
+#color_order: GRB
+
+#[neopixel Extra4]
+#pin: Turtle_2:RGB4
+#chain_count: 4
+#color_order: GRB
+--- end AFC_Turtle_2.cfg ---
+--- mcu/AFC_Turtle_2_mcu.cfg ---
+[board_pins Turtle_1]
+mcu: Turtle_1
+aliases:
+    M1_STEP=PE7    	, M1_DIR=PG1    , M1_EN=PE10   	, M1_UART=PE8   ,
+    M2_STEP=PB2     , M2_DIR=PA3    , M2_EN=PG0   	, M2_UART=PF15  ,
+    M3_STEP=PA0    	, M3_DIR=PC1    , M3_EN=PA2   	, M3_UART=PA1   ,
+    M4_STEP=PF9  	, M4_DIR=PF8    , M4_EN=PC0   	, M4_UART=PF10  ,
+    M5_STEP=PF5   	, M5_DIR=PF4    , M5_EN=PF7   	, M5_UART=PF6   ,
+    M6_STEP=PF1    	, M6_DIR=PF0    , M6_EN=PF3   	, M6_UART=PF2   ,
+    M7_STEP=PE5    	, M7_DIR=PE4    , M7_EN=PC13   	, M7_UART=PE6   ,
+    M8_STEP=PE1    	, M8_DIR=PE0    , M8_EN=PE3   	, M8_UART=PE2   ,
+
+    # suggested switch pin configurations
+    HUB=PD0 		,
+    TRG1=PD1  		, TRG2=PD4   	, TRG3=PD6 		, TRG4=PG9		,
+    TRG5=PG11		, TRG6=PD3		, TRG7=PD2		, TRG8=PD5		,
+    EXT1=PD7 		, EXT2=PG10  	, EXT3=PG12		, EXT4=PG13		,
+    EXT5=PB7		, EXT6=PB6		, EXT7=PB5		, EXT8=PB4		,
+    TN_ADV=PB3      , TN_TRL=PG15  ,
+
+    # alternate names for endstop ports
+    SW1=PD0 		, SW2=PD1 	, SW3=PD4  	, SW4=PD6 	, SW5=PG9	, SW6=PG11	,
+    SW7=PD3 		, SW8=PD2	, SW9=PD5	, SW10=PD7	, SW11=PG10	, SW12=PG12, SW13=PG13 ,
+    SW14=PB7        , SW15=PB6	, SW16=PB5	, SW17=PB4	, SW18=PB3	, SW19=PG15	, SW20=PG14	,
+	
+    MOT1_RWD=PE9	, MOT1_FWD=PE11	, MOT1_EN=PE15	,
+    MOT2_RWD=PE13	, MOT2_FWD=PE14	, MOT2_EN=PD9	,
+    MOT3_RWD=PB10	, MOT3_FWD=PB11	, MOT3_EN=PB13	,
+    MOT4_RWD=PB14	, MOT4_FWD=PB15	, MOT4_EN=PD11	,
+    MOT5_RWD=PD12	, MOT5_FWD=PD13	, MOT5_EN=PG3	,
+    MOT6_RWD=PD14	, MOT6_FWD=PD15	, MOT6_EN=PG5	,
+    MOT7_RWD=PC6	, MOT7_FWD=PC7	, MOT7_EN=PG7	,
+    MOT8_RWD=PC8	, MOT8_FWD=PA15	, MOT8_EN=PC11	,
+	
+    RGB1=PA5		, RGB2=PC14	    , RGB3=PC15	    , RGB4=PA4		,
+    # The following thermistor pins are ADC compatible on the AFC Pro board for the PSF sensor
+    # PA7, PA6 
+    PSF=PC4,
+--- end mcu/AFC_Turtle_2_mcu.cfg ---
