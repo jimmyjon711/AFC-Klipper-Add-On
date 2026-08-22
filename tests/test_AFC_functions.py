@@ -138,6 +138,20 @@ class _NewKlipperGCodeMove:
         return {"absolute_extrude": self.allow_absolute_extrude}
 
 
+class _OldKlipperGCodeMoveAttrOnly:
+    """Legacy Klipper mock with absolute_extrude and no get_status()."""
+
+    def __init__(self, value):
+        self.absolute_extrude = value
+
+
+class _NewKlipperGCodeMoveAttrOnly:
+    """Post-PR-7349 Klipper mock with allow_absolute_extrude and no get_status()."""
+
+    def __init__(self, value):
+        self.allow_absolute_extrude = value
+
+
 class TestGcodeAbsoluteExtrudeCompat:
     def test_reads_status_key_on_new_klipper(self):
         move = _NewKlipperGCodeMove(False)
@@ -145,6 +159,16 @@ class TestGcodeAbsoluteExtrudeCompat:
 
     def test_reads_status_key_on_old_klipper(self):
         move = _OldKlipperGCodeMove(False)
+        assert get_gcode_absolute_extrude(move) is False
+
+    def test_reads_attr_on_old_klipper_without_get_status(self):
+        move = _OldKlipperGCodeMoveAttrOnly(False)
+        assert not hasattr(move, "get_status")
+        assert get_gcode_absolute_extrude(move) is False
+
+    def test_reads_attr_on_new_klipper_without_get_status(self):
+        move = _NewKlipperGCodeMoveAttrOnly(False)
+        assert not hasattr(move, "get_status")
         assert get_gcode_absolute_extrude(move) is False
 
     def test_writes_allow_absolute_extrude_on_new_klipper(self):
