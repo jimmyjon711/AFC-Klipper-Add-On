@@ -37,7 +37,8 @@ except: raise error(ERROR_STR.format(import_lib="AFC_logger", trace=traceback.fo
 try: from extras.AFC_logger import AFC_logger
 except: raise error(ERROR_STR.format(import_lib="AFC_logger", trace=traceback.format_exc()))
 
-try: from extras.AFC_functions import afcDeltaTime, round_floats, get_gcode_absolute_extrude, set_gcode_absolute_extrude
+try:
+    from extras.AFC_functions import afcDeltaTime, round_floats, get_gcode_absolute_extrude, set_gcode_absolute_extrude
 except: raise error(ERROR_STR.format(import_lib="AFC_functions", trace=traceback.format_exc()))
 
 try: from extras.AFC_utils import add_filament_switch, AFC_moonraker, AFC_PrintFileMetaData
