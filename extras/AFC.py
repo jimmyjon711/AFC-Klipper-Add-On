@@ -36,7 +36,7 @@ except: raise error(ERROR_STR.format(import_lib="AFC_logger", trace=traceback.fo
 try: from extras.AFC_logger import AFC_logger
 except: raise error(ERROR_STR.format(import_lib="AFC_logger", trace=traceback.format_exc()))
 
-try: from extras.AFC_functions import afcDeltaTime, round_floats
+try: from extras.AFC_functions import afcDeltaTime, round_floats, get_gcode_absolute_extrude, set_gcode_absolute_extrude
 except: raise error(ERROR_STR.format(import_lib="AFC_functions", trace=traceback.format_exc()))
 
 try: from extras.AFC_utils import add_filament_switch, AFC_moonraker, AFC_PrintFileMetaData
@@ -1127,7 +1127,7 @@ class afc:
                 self.speed                  = self.gcode_move.speed
                 self.speed_factor           = self.gcode_move.speed_factor
                 self.absolute_coord         = self.gcode_move.absolute_coord
-                self.absolute_extrude       = self.gcode_move.absolute_extrude
+                self.absolute_extrude       = get_gcode_absolute_extrude(self.gcode_move)
                 self.extrude_factor         = self.gcode_move.extrude_factor
                 # Only rounded for the log message below, stored position values keep full precision
                 msg = f"Saving position {round_floats(self.last_toolhead_position)}"
@@ -1191,7 +1191,7 @@ class afc:
 
         # Restore absolute coords
         self.gcode_move.absolute_coord      = self.absolute_coord
-        self.gcode_move.absolute_extrude    = self.absolute_extrude
+        set_gcode_absolute_extrude(self.gcode_move, self.absolute_extrude)
         self.gcode_move.extrude_factor      = self.extrude_factor
         self.gcode_move.speed               = self.speed
         self.gcode_move.speed_factor        = self.speed_factor
