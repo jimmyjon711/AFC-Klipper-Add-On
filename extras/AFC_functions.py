@@ -64,6 +64,51 @@ def round_floats(value: Any, digits: int = 6) -> Any:
     return value
 
 
+def get_gcode_absolute_extrude(gcode_move: Any, eventtime: Optional[float] = None) -> Any:
+    """
+    Read Klipper GCodeMove absolute-extrude state.
+
+    Klipper PR 7349 renamed the internal attribute from absolute_extrude to
+    allow_absolute_extrude. The get_status() key remains 'absolute_extrude'.
+    Prefer that status key; fall back to either attribute name.
+
+    :param gcode_move: Klipper gcode_move object
+    :param eventtime: Optional event time forwarded to get_status()
+    :return Any: Current absolute-extrude flag (status key name unchanged)
+    """
+    get_status = getattr(gcode_move, "get_status", None)
+    if callable(get_status):
+        try:
+            status = get_status() if eventtime is None else get_status(eventtime)
+        except TypeError:
+            status = get_status(eventtime)
+        if isinstance(status, dict) and "absolute_extrude" in status:
+            return status["absolute_extrude"]
+    if hasattr(gcode_move, "allow_absolute_extrude"):
+        return gcode_move.allow_absolute_extrude
+    return getattr(gcode_move, "absolute_extrude", True)
+
+
+def set_gcode_absolute_extrude(gcode_move: Any, value: bool) -> None:
+    """
+    Write Klipper GCodeMove absolute-extrude state.
+
+    Sets allow_absolute_extrude on post-PR-7349 Klipper and absolute_extrude
+    on older Klipper (hasattr / getattr compatibility).
+
+    :param gcode_move: Klipper gcode_move object
+    :param value: Absolute-extrude flag to restore
+    """
+    has_new = hasattr(gcode_move, "allow_absolute_extrude")
+    has_old = hasattr(gcode_move, "absolute_extrude")
+    # New name present, or old name missing: write the post-7349 attribute.
+    if has_new or not has_old:
+        gcode_move.allow_absolute_extrude = value
+    # Old name present, or new name missing: write the legacy attribute.
+    if has_old or not has_new:
+        gcode_move.absolute_extrude = value
+
+
 def load_config(config):
     return afcFunction(config)
 
@@ -667,7 +712,7 @@ class afcFunction:
         msg += f" speed_factor: {round_floats(self.afc.gcode_move.speed_factor)}"
         msg += f" extrude_factor: {round_floats(self.afc.gcode_move.extrude_factor)}"
         msg += f" absolute_coord: {self.afc.gcode_move.absolute_coord}"
-        msg += f" absolute_extrude: {self.afc.gcode_move.absolute_extrude}\n"
+        msg += f" absolute_extrude: {get_gcode_absolute_extrude(self.afc.gcode_move)}\n"
         self.logger.debug(msg, only_debug=True)
 
     def check_absolute_mode( self, func_name:str="" ):
@@ -683,9 +728,9 @@ class afcFunction:
         if not self.afc.gcode_move.absolute_coord:
             self.logger.debug("Printer coords not in absolute mode, setting to absolute mode")
             self.afc.gcode_move.absolute_coord = True
-        if not self.afc.gcode_move.absolute_extrude:
+        if not get_gcode_absolute_extrude(self.afc.gcode_move):
             self.logger.debug("Printer extruder not in absolute mode, setting to absolute mode")
-            self.afc.gcode_move.absolute_extrude = True
+            set_gcode_absolute_extrude(self.afc.gcode_move, True)
 
     def get_extruder_pos(self, eventtime=None, past_extruder_position=None, extruder=None):
         """
