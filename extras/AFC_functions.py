@@ -69,7 +69,7 @@ def get_gcode_absolute_extrude(gcode_move: GCodeMove) -> bool:
     """
     Read Klipper GCodeMove absolute-extrude state.
 
-    Klipper PR 7349 renamed the internal attribute from absolute_extrude to
+    Klipper PR 7349(v0.13.0-741) renamed the internal attribute from absolute_extrude to
     allow_absolute_extrude.
 
     :param gcode_move: Klipper gcode_move object
