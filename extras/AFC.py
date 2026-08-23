@@ -18,6 +18,7 @@ from typing import Dict, TYPE_CHECKING, Union, Any, Optional, Tuple, List
 if TYPE_CHECKING:
     from configfile import ConfigWrapper
     from gcode import GCodeDispatch, GCodeCommand
+    from extras.gcode_move import GCodeMove
     from extras.AFC_lane import AFCLane
     from extras.AFC_extruder import AFCExtruder
     from extras.AFC_functions import afcFunction
@@ -37,7 +38,11 @@ try: from extras.AFC_logger import AFC_logger
 except: raise error(ERROR_STR.format(import_lib="AFC_logger", trace=traceback.format_exc()))
 
 try:
-    from extras.AFC_functions import afcDeltaTime, round_floats, get_gcode_absolute_extrude, set_gcode_absolute_extrude
+    from extras.AFC_functions import (
+        afcDeltaTime, round_floats,
+        get_gcode_absolute_extrude,
+        set_gcode_absolute_extrude
+    )
 except: raise error(ERROR_STR.format(import_lib="AFC_functions", trace=traceback.format_exc()))
 
 try: from extras.AFC_utils import add_filament_switch, AFC_moonraker, AFC_PrintFileMetaData
@@ -428,7 +433,7 @@ class afc:
         """
         self.toolhead   = self.printer.lookup_object('toolhead')
         self.idle       = self.printer.lookup_object('idle_timeout')
-        self.gcode_move = self.printer.lookup_object('gcode_move')
+        self.gcode_move: GCodeMove = self.printer.lookup_object('gcode_move')
 
         # Looking up to see if manual_home has probe_pos, this is to make AFC work with klipper
         # starting with new homing update git hash(57c2e0c960f8e25f56a66ba3a1e90e124f207001)
