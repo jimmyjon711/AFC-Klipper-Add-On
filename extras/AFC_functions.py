@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from extras.AFC_stepper import AFCExtruderStepper
     from extras.AFC_hub import afc_hub
     from gcode import GCodeCommand
+    from extras.gcode_move import GCodeMove
 
 try: from extras.AFC_utils import ERROR_STR
 except: raise error("Error when trying to import AFC_utils.ERROR_STR\n{trace}".format(trace=traceback.format_exc()))
@@ -64,32 +65,22 @@ def round_floats(value: Any, digits: int = 6) -> Any:
     return value
 
 
-def get_gcode_absolute_extrude(gcode_move: Any, eventtime: Optional[float] = None) -> Any:
+def get_gcode_absolute_extrude(gcode_move: GCodeMove) -> bool:
     """
     Read Klipper GCodeMove absolute-extrude state.
 
     Klipper PR 7349 renamed the internal attribute from absolute_extrude to
-    allow_absolute_extrude. The get_status() key remains 'absolute_extrude'.
-    Prefer that status key; fall back to either attribute name.
+    allow_absolute_extrude.
 
     :param gcode_move: Klipper gcode_move object
-    :param eventtime: Optional event time forwarded to get_status()
-    :return Any: Current absolute-extrude flag (status key name unchanged)
+    :return bool: Current absolute-extrude flag
     """
-    get_status = getattr(gcode_move, "get_status", None)
-    if callable(get_status):
-        try:
-            status = get_status() if eventtime is None else get_status(eventtime)
-        except TypeError:
-            status = get_status(eventtime)
-        if isinstance(status, dict) and "absolute_extrude" in status:
-            return status["absolute_extrude"]
     if hasattr(gcode_move, "allow_absolute_extrude"):
         return gcode_move.allow_absolute_extrude
     return getattr(gcode_move, "absolute_extrude", True)
 
 
-def set_gcode_absolute_extrude(gcode_move: Any, value: bool) -> None:
+def set_gcode_absolute_extrude(gcode_move: GCodeMove, value: bool) -> None:
     """
     Write Klipper GCodeMove absolute-extrude state.
 
@@ -107,7 +98,6 @@ def set_gcode_absolute_extrude(gcode_move: Any, value: bool) -> None:
     # Old name present, or new name missing: write the legacy attribute.
     if has_old or not has_new:
         gcode_move.absolute_extrude = value
-
 
 def load_config(config):
     return afcFunction(config)

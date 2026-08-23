@@ -123,19 +123,21 @@ class TestLogToolheadPos:
 # ── Klipper PR 7349 absolute_extrude compat ───────────────────────────────────
 
 class _OldKlipperGCodeMove:
-    def __init__(self, value):
+    def __init__(self, value, status_value=None):
         self.absolute_extrude = value
+        self._status_value = value if status_value is None else status_value
 
     def get_status(self, eventtime=None):
-        return {"absolute_extrude": self.absolute_extrude}
+        return {"absolute_extrude": self._status_value}
 
 
 class _NewKlipperGCodeMove:
-    def __init__(self, value):
+    def __init__(self, value, status_value=None):
         self.allow_absolute_extrude = value
+        self._status_value = value if status_value is None else status_value
 
     def get_status(self, eventtime=None):
-        return {"absolute_extrude": self.allow_absolute_extrude}
+        return {"absolute_extrude": self._status_value}
 
 
 class _OldKlipperGCodeMoveAttrOnly:
@@ -153,14 +155,6 @@ class _NewKlipperGCodeMoveAttrOnly:
 
 
 class TestGcodeAbsoluteExtrudeCompat:
-    def test_reads_status_key_on_new_klipper(self):
-        move = _NewKlipperGCodeMove(False)
-        assert get_gcode_absolute_extrude(move) is False
-
-    def test_reads_status_key_on_old_klipper(self):
-        move = _OldKlipperGCodeMove(False)
-        assert get_gcode_absolute_extrude(move) is False
-
     def test_reads_attr_on_old_klipper_without_get_status(self):
         move = _OldKlipperGCodeMoveAttrOnly(False)
         assert not hasattr(move, "get_status")
@@ -170,6 +164,23 @@ class TestGcodeAbsoluteExtrudeCompat:
         move = _NewKlipperGCodeMoveAttrOnly(False)
         assert not hasattr(move, "get_status")
         assert get_gcode_absolute_extrude(move) is False
+
+    def test_ignores_get_status_on_new_klipper(self):
+        """get_gcode_absolute_extrude no longer consults get_status() at all
+        (Klipper PR 7349 compat fix) -- a stale/conflicting status dict must
+        not influence the result, only the allow_absolute_extrude attr does."""
+        move = _NewKlipperGCodeMove(False, status_value=True)
+        assert get_gcode_absolute_extrude(move) is False
+
+    def test_ignores_get_status_on_old_klipper(self):
+        move = _OldKlipperGCodeMove(False, status_value=True)
+        assert get_gcode_absolute_extrude(move) is False
+
+    def test_defaults_to_true_when_neither_attribute_present(self):
+        """Covers the final getattr(..., True) fallback when the gcode_move
+        object exposes neither allow_absolute_extrude nor absolute_extrude."""
+        move = object()
+        assert get_gcode_absolute_extrude(move) is True
 
     def test_writes_allow_absolute_extrude_on_new_klipper(self):
         move = _NewKlipperGCodeMove(False)
