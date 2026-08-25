@@ -46,7 +46,7 @@ except: raise error(ERROR_STR.format(import_lib="AFC_utils", trace=traceback.for
 try: from extras.AFC_stats import AFCStats
 except: raise error(ERROR_STR.format(import_lib="AFC_stats", trace=traceback.format_exc()))
 
-AFC_VERSION="1.2.5"
+AFC_VERSION="1.2.6"
 
 # Class for holding different states so its clear what all valid states are
 class State(str, Enum):
@@ -130,6 +130,7 @@ class afc:
         self.number_of_toolchanges  = 0
         self.current_toolchange     = 0
         self.print_tool_temperatures: List[int] = []
+        self.active_led_effects: List[str] = []
 
         # tool position when tool change was requested
         self.change_tool_pos = None
@@ -1404,6 +1405,7 @@ class afc:
             # Setting status as ejecting so if filament is removed and de-activates the prep sensor while
             # extruder motors are still running it does not trigger infinite spool or pause logic
             # once user removes filament lanes status will go to None
+            cur_lane.unit_obj.lane_unloading(cur_lane)
             cur_lane.status = AFCLaneState.EJECTING
             self.save_vars()
 
@@ -1420,7 +1422,7 @@ class afc:
             # Removing spool from vars since it was ejected
             self.spool.set_spoolID(cur_lane, None)
             self.logger.info("LANE {} eject done".format(cur_lane.name))
-            cur_lane.unit_obj.lane_not_ready(cur_lane)
+            cur_lane.unit_obj.lane_unloaded(cur_lane)
         elif cur_lane.extruder_obj.is_standalone() and cur_lane.extruder_obj.lane_loaded:
             cur_lane.status = AFCLaneState.EJECTING
             cur_lane.extruder_obj.load_unload_sequence(cur_lane.extruder_obj.tool_stn_unload*-1)
@@ -1836,6 +1838,7 @@ class afc:
             cur_lane.status = AFCLaneState.TOOL_LOADED
             self.save_vars()
             cur_lane.sync_to_extruder()
+            cur_lane.unit_obj.lane_tool_loaded_gears(cur_lane)
 
             if cur_extruder.tool_end:
                 while not cur_extruder.tool_end_state:
@@ -2334,7 +2337,7 @@ class afc:
 
             # Finalize unloading and reset lane state.
             cur_lane.loaded_to_hub = True
-            cur_lane.unit_obj.lane_tool_unloaded(cur_lane)
+            cur_lane.unit_obj.lane_loaded(cur_lane)
             cur_lane.status = AFCLaneState.NONE
 
             if (cur_lane.is_direct_hub()
