@@ -2948,6 +2948,41 @@ class TestSavePos:
         )
         obj.function.log_toolhead_pos.assert_called_once_with(expected)
 
+    def test_does_not_save_when_not_homed(self):
+        """When function.is_homed(for_move=True) returns False, save_pos returns
+        immediately without inspecting in_toolchange/error_state/is_paused/position_saved."""
+        obj = _make_afc_for_save_pos()
+        obj.in_toolchange = False
+        obj.error_state = False
+        obj.function.is_paused.return_value = False
+        obj.function.is_homed.return_value = False
+        obj.position_saved = False
+
+        obj.save_pos()
+
+        assert obj.position_saved is False
+        assert not hasattr(obj, "last_toolhead_position")
+        obj.function.is_homed.assert_called_once_with(for_move=True)
+        obj.function.log_toolhead_pos.assert_called_once()
+
+    def test_logs_not_saving_unhomed_message(self):
+        """Verifies the exact log_toolhead_pos() call made on the not-homed branch."""
+        obj = _make_afc_for_save_pos()
+        obj.in_toolchange = False
+        obj.error_state = False
+        obj.function.is_paused.return_value = False
+        obj.function.is_homed.return_value = False
+        obj.position_saved = False
+
+        obj.save_pos()
+
+        expected = (
+            f"Not Saving unhomed position, Error State: {obj.error_state}, "
+            f"Is Paused {obj.function.is_paused()}, Position_saved {obj.position_saved}, "
+            f"in toolchange: {obj.in_toolchange}, POS: "
+        )
+        obj.function.log_toolhead_pos.assert_called_once_with(expected)
+
     def test_does_not_save_when_in_toolchange(self):
         """When in_toolchange is True, the outer branch is taken regardless of
         error_state/is_paused/position_saved."""
@@ -3112,6 +3147,63 @@ class TestRestorePos:
             f"in toolchange: {in_toolchange_before}, POS: "
         )
         assert calls[2].args[0] == expected_final
+
+    def test_does_not_restore_when_position_not_saved(self):
+        """When position_saved is False, restore_pos returns immediately without
+        touching gcode_move state, moving the toolhead, or changing current_state."""
+        obj = _make_afc_for_restore_pos()
+        obj.position_saved = False
+        obj.current_state = State.IDLE
+        obj.function.is_paused.return_value = False
+        last_position_before = list(obj.gcode_move.last_position)
+        base_position_before = list(obj.gcode_move.base_position)
+
+        obj.restore_pos(move_z_first=False)
+
+        assert obj.position_saved is False
+        assert obj.current_state == State.IDLE
+        assert obj.gcode_move.last_position == last_position_before
+        assert obj.gcode_move.base_position == base_position_before
+        obj.move_z_pos.assert_not_called()
+        obj.gcode_move.move_with_transform.assert_not_called()
+
+        expected = (
+            f"Not restoring position, Error State: {obj.error_state}, "
+            f"Is Paused {obj.function.is_paused.return_value}, "
+            f"Position_saved {obj.position_saved}, "
+            f"in toolchange: {obj.in_toolchange}, POS: "
+        )
+        obj.function.log_toolhead_pos.assert_called_once_with(expected)
+        debug_msgs = [m for lvl, m in obj.logger.messages if lvl == "debug"]
+        assert debug_msgs == []
+
+    def test_does_not_restore_when_position_not_saved_move_z_first_true(self):
+        """The position_saved guard applies before the move_z_first branch is
+        ever reached, regardless of which value is passed."""
+        obj = _make_afc_for_restore_pos()
+        obj.position_saved = False
+
+        obj.restore_pos(move_z_first=True)
+
+        obj.move_z_pos.assert_not_called()
+        obj.gcode_move.move_with_transform.assert_not_called()
+
+    def test_logs_not_restoring_message_when_position_not_saved(self):
+        """Verifies the exact log_toolhead_pos() call made on the not-saved branch."""
+        obj = _make_afc_for_restore_pos()
+        obj.position_saved = False
+        obj.in_toolchange = False
+        obj.error_state = False
+        obj.function.is_paused.return_value = False
+
+        obj.restore_pos(move_z_first=False)
+
+        expected = (
+            f"Not restoring position, Error State: {obj.error_state}, "
+            f"Is Paused {obj.function.is_paused()}, Position_saved {obj.position_saved}, "
+            f"in toolchange: {obj.in_toolchange}, POS: "
+        )
+        obj.function.log_toolhead_pos.assert_called_once_with(expected)
 
 
 # in_print_reactor_timer: moonraker None guard
