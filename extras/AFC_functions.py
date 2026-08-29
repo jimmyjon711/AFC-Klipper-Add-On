@@ -382,7 +382,7 @@ class afcFunction:
         else:
             return True
 
-    def is_homed(self, for_move=False):
+    def is_homed(self, for_move: bool=False) -> bool:
         """
         Helper function to determine if printer is currently homed
 
