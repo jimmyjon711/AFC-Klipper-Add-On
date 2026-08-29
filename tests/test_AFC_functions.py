@@ -16,7 +16,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch, call
 import pytest
 
-from extras.AFC_functions import afcFunction, afcDeltaTime, round_floats
+from extras.AFC_functions import afcFunction, afcDeltaTime, round_floats, get_gcode_absolute_extrude, set_gcode_absolute_extrude
 from extras.AFC_respond import AFCprompt
 
 from tests.test_AFC import _make_afc
@@ -86,6 +86,8 @@ class TestLogToolheadPos:
         func.afc.gcode_move.extrude_factor = 1.0
         func.afc.gcode_move.absolute_coord = True
         func.afc.gcode_move.absolute_extrude = False
+        func.afc.gcode_move.allow_absolute_extrude = False
+        func.afc.gcode_move.get_status.return_value = {"absolute_extrude": False}
 
     def test_logs_expected_message_with_move_pre(self):
         func = _make_func()
@@ -116,6 +118,94 @@ class TestLogToolheadPos:
             "absolute_coord: True absolute_extrude: False\n"
         )
         assert func.logger.messages == [("debug", expected)]
+
+
+# ── Klipper PR 7349 absolute_extrude compat ───────────────────────────────────
+
+class _OldKlipperGCodeMove:
+    def __init__(self, value, status_value=None):
+        self.absolute_extrude = value
+        self._status_value = value if status_value is None else status_value
+
+    def get_status(self, eventtime=None):
+        return {"absolute_extrude": self._status_value}
+
+
+class _NewKlipperGCodeMove:
+    def __init__(self, value, status_value=None):
+        self.allow_absolute_extrude = value
+        self._status_value = value if status_value is None else status_value
+
+    def get_status(self, eventtime=None):
+        return {"absolute_extrude": self._status_value}
+
+
+class _OldKlipperGCodeMoveAttrOnly:
+    """Legacy Klipper mock with absolute_extrude and no get_status()."""
+
+    def __init__(self, value):
+        self.absolute_extrude = value
+
+
+class _NewKlipperGCodeMoveAttrOnly:
+    """Post-PR-7349 Klipper mock with allow_absolute_extrude and no get_status()."""
+
+    def __init__(self, value):
+        self.allow_absolute_extrude = value
+
+
+class TestGcodeAbsoluteExtrudeCompat:
+    def test_reads_attr_on_old_klipper_without_get_status(self):
+        move = _OldKlipperGCodeMoveAttrOnly(False)
+        assert not hasattr(move, "get_status")
+        assert get_gcode_absolute_extrude(move) is False
+
+    def test_reads_attr_on_new_klipper_without_get_status(self):
+        move = _NewKlipperGCodeMoveAttrOnly(False)
+        assert not hasattr(move, "get_status")
+        assert get_gcode_absolute_extrude(move) is False
+
+    def test_ignores_get_status_on_new_klipper(self):
+        """get_gcode_absolute_extrude no longer consults get_status() at all
+        (Klipper PR 7349 compat fix) -- a stale/conflicting status dict must
+        not influence the result, only the allow_absolute_extrude attr does."""
+        move = _NewKlipperGCodeMove(False, status_value=True)
+        assert get_gcode_absolute_extrude(move) is False
+
+    def test_ignores_get_status_on_old_klipper(self):
+        move = _OldKlipperGCodeMove(False, status_value=True)
+        assert get_gcode_absolute_extrude(move) is False
+
+    def test_defaults_to_true_when_neither_attribute_present(self):
+        """Covers the final getattr(..., True) fallback when the gcode_move
+        object exposes neither allow_absolute_extrude nor absolute_extrude."""
+        move = object()
+        assert get_gcode_absolute_extrude(move) is True
+
+    def test_writes_allow_absolute_extrude_on_new_klipper(self):
+        move = _NewKlipperGCodeMove(False)
+        set_gcode_absolute_extrude(move, True)
+        assert move.allow_absolute_extrude is True
+        assert not hasattr(move, "absolute_extrude")
+
+    def test_writes_absolute_extrude_on_old_klipper(self):
+        move = _OldKlipperGCodeMove(False)
+        set_gcode_absolute_extrude(move, True)
+        assert move.absolute_extrude is True
+        assert not hasattr(move, "allow_absolute_extrude")
+
+    def test_check_absolute_mode_sets_new_klipper_attr(self):
+        func = _make_func()
+        func.afc.gcode_move = _NewKlipperGCodeMove(False)
+        func.afc.gcode_move.absolute_coord = True
+        func.afc.gcode_move.base_position = [0, 0, 0, 0]
+        func.afc.gcode_move.last_position = [0, 0, 0, 0]
+        func.afc.gcode_move.speed = 1.0
+        func.afc.gcode_move.speed_factor = 1.0
+        func.afc.gcode_move.extrude_factor = 1.0
+        func.afc.toolhead.get_position.return_value = [0, 0, 0, 0]
+        func.check_absolute_mode("TEST")
+        assert func.afc.gcode_move.allow_absolute_extrude is True
 
 
 # ── HexConvert ────────────────────────────────────────────────────────────────

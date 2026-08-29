@@ -2831,6 +2831,8 @@ def _make_afc_for_save_pos():
     obj.gcode_move.speed_factor = 0.016666666666666666
     obj.gcode_move.absolute_coord = True
     obj.gcode_move.absolute_extrude = False
+    obj.gcode_move.allow_absolute_extrude = False
+    obj.gcode_move.get_status.return_value = {"absolute_extrude": False}
     obj.gcode_move.extrude_factor = 1.0
     obj.toolhead.get_position.return_value = [
         165.174093123, 256.300678987, 3.0715305953986847, 2882.80021999998,
@@ -3080,6 +3082,7 @@ class TestRestorePos:
         assert obj.gcode_move.homing_position == [0.0, 0.0, 0.0, 0.0]
         assert obj.gcode_move.absolute_coord is True
         assert obj.gcode_move.absolute_extrude is False
+        assert obj.gcode_move.allow_absolute_extrude is False
         assert obj.gcode_move.extrude_factor == 1.0
         assert obj.gcode_move.speed == 350.0
         assert obj.gcode_move.speed_factor == 0.016666666666666666

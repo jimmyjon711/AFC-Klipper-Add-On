@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2026-08-23]
+### Fixed
+- AFC no longer crashes with `AttributeError: 'GCodeMove' object has no attribute 'absolute_extrude'` during tool changes on current Klipper master builds. Klipper renamed the `absolute_extrude` attribute to `allow_absolute_extrude` (v0.13.0-741 and newer); AFC now reads and restores whichever attribute name the host provides, so it keeps working on older and newer Klipper alike.
+
 ## [2026-08-22]
 ### Added
 - Lane and extruder status LEDs can now overlay a `SET_LED_EFFECT` animation on top of the usual
