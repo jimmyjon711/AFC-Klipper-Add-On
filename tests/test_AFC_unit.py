@@ -13,6 +13,7 @@ Covers:
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, call
 import pytest
 
@@ -1134,3 +1135,205 @@ class TestLaneOrdering:
         unit.handle_ready()
 
         assert list(unit.lanes.keys()) == ["lane1", "lane2", "lane3", "custom_name4", "lane10"]
+
+
+# ── get_td1_data / _apply_td1_data ───────────────────────────────────────────
+
+def _make_td1_lane():
+    lane = _make_lane()
+    lane.td1_device_id = "SN1"
+    lane.td1_data = None
+    return lane
+
+
+def _make_td1_device(scan_time="2024-01-01T12:00:00Z", td="PLA", color="#FF0000"):
+    return {"scan_time": scan_time, "td": td, "color": color}
+
+
+class TestGetTd1Data:
+    def test_fetches_then_delegates_to_apply(self):
+        unit = _make_unit()
+        lane = _make_td1_lane()
+        unit.afc.moonraker = MagicMock()
+        unit.afc.moonraker.get_td1_data.return_value = {"SN1": _make_td1_device()}
+        unit._apply_td1_data = MagicMock(return_value=True)
+        compare_time = datetime.now()
+
+        result = unit.get_td1_data(lane, compare_time, ignore_time=True)
+
+        unit.afc.moonraker.get_td1_data.assert_called_once_with()
+        unit._apply_td1_data.assert_called_once_with(
+            lane, compare_time, {"SN1": _make_td1_device()}, True)
+        assert result is True
+
+
+class TestApplyTd1Data:
+    def test_none_data_returns_false(self):
+        """Covers td1_data being None (a failed fetch) without crashing."""
+        unit = _make_unit()
+        lane = _make_td1_lane()
+        result = unit._apply_td1_data(lane, datetime.now(), None)
+        assert result is False
+        assert unit.logger.messages == []
+
+    def test_empty_data_returns_false(self):
+        unit = _make_unit()
+        lane = _make_td1_lane()
+        result = unit._apply_td1_data(lane, datetime.now(), {})
+        assert result is False
+        assert unit.logger.messages == []
+
+    def test_device_id_not_in_data_logs_error_and_returns_false(self):
+        unit = _make_unit()
+        lane = _make_td1_lane()
+        compare_time = datetime.now()
+        td1_data = {"OTHER": _make_td1_device()}
+
+        result = unit._apply_td1_data(lane, compare_time, td1_data)
+
+        assert result is False
+        assert unit.logger.messages == [
+            ("debug", f"Data: {td1_data}, Compare_time: {compare_time}"),
+            ("error", "TD-1 Device ID (SN1) supplied, but ID not found."),
+        ]
+
+    def test_none_scan_time_returns_false(self):
+        unit = _make_unit()
+        lane = _make_td1_lane()
+        compare_time = datetime.now()
+        td1_data = {"SN1": _make_td1_device(scan_time=None)}
+
+        result = unit._apply_td1_data(lane, compare_time, td1_data)
+
+        assert result is False
+        assert unit.logger.messages == [
+            ("debug", f"Data: {td1_data}, Compare_time: {compare_time}"),
+        ]
+
+    def test_unparseable_scan_time_logs_error_and_returns_false(self):
+        unit = _make_unit()
+        lane = _make_td1_lane()
+        compare_time = datetime.now()
+        td1_data = {"SN1": _make_td1_device(scan_time="not-a-timestamp")}
+
+        result = unit._apply_td1_data(lane, compare_time, td1_data)
+
+        assert result is False
+        assert unit.logger.messages == [
+            ("debug", f"Data: {td1_data}, Compare_time: {compare_time}"),
+            ("error", "Error trying to format TD-1 scan time, check AFC.log for more information"),
+        ]
+
+    # scan_time (from the device payload) is always parsed as a UTC instant;
+    # compare_time is built the same way here (rather than a naive local
+    # datetime) so these comparisons don't depend on the test machine's
+    # local timezone.
+
+    def test_scan_time_after_compare_time_is_valid_and_applies(self):
+        unit = _make_unit()
+        lane = _make_td1_lane()
+        compare_time = datetime(2024, 1, 1, 11, 0, 0, tzinfo=timezone.utc)
+        device = _make_td1_device(scan_time="2024-01-01T12:00:00Z")
+        td1_data = {"SN1": device}
+
+        result = unit._apply_td1_data(lane, compare_time, td1_data)
+
+        assert result is True
+        assert lane.td1_data == device
+        unit.afc.save_vars.assert_called_once_with()
+        assert unit.logger.messages == [
+            ("debug", f"Data: {td1_data}, Compare_time: {compare_time}"),
+            ("info", f"{lane.name} TD-1 data captured"),
+        ]
+
+    def test_scan_time_shortly_before_compare_time_is_still_valid(self):
+        """Covers the `(compare_time - scan_time) < t_delta` grace-period branch."""
+        unit = _make_unit()
+        lane = _make_td1_lane()
+        compare_time = datetime(2024, 1, 1, 12, 0, 5, tzinfo=timezone.utc)
+        device = _make_td1_device(scan_time="2024-01-01T12:00:00Z")
+        td1_data = {"SN1": device}
+
+        result = unit._apply_td1_data(lane, compare_time, td1_data)
+
+        assert result is True
+        assert unit.logger.messages == [
+            ("debug", f"Data: {td1_data}, Compare_time: {compare_time}"),
+            ("info", f"{lane.name} TD-1 data captured"),
+        ]
+
+    def test_scan_time_already_ending_in_offset_is_parsed(self):
+        """Covers the `scan_time.endswith("+00:00Z")` True branch, distinct
+        from the plain "Z"-suffixed format used by the other tests here."""
+        unit = _make_unit()
+        lane = _make_td1_lane()
+        compare_time = datetime(2024, 1, 1, 11, 0, 0, tzinfo=timezone.utc)
+        device = _make_td1_device(scan_time="2024-01-01T12:00:00+00:00Z")
+        td1_data = {"SN1": device}
+
+        result = unit._apply_td1_data(lane, compare_time, td1_data)
+
+        assert result is True
+        assert unit.logger.messages == [
+            ("debug", f"Data: {td1_data}, Compare_time: {compare_time}"),
+            ("info", f"{lane.name} TD-1 data captured"),
+        ]
+
+    def test_stale_scan_time_without_ignore_time_is_not_valid(self):
+        unit = _make_unit()
+        lane = _make_td1_lane()
+        compare_time = datetime(2024, 1, 1, 13, 0, 0, tzinfo=timezone.utc)
+        device = _make_td1_device(scan_time="2024-01-01T12:00:00Z")
+        td1_data = {"SN1": device}
+
+        result = unit._apply_td1_data(lane, compare_time, td1_data, ignore_time=False)
+
+        assert result is False
+        assert lane.td1_data is None
+        assert unit.logger.messages == [
+            ("debug", f"Data: {td1_data}, Compare_time: {compare_time}"),
+        ]
+
+    def test_stale_scan_time_with_ignore_time_still_applies(self):
+        unit = _make_unit()
+        lane = _make_td1_lane()
+        compare_time = datetime(2024, 1, 1, 13, 0, 0, tzinfo=timezone.utc)
+        device = _make_td1_device(scan_time="2024-01-01T12:00:00Z")
+        td1_data = {"SN1": device}
+
+        result = unit._apply_td1_data(lane, compare_time, td1_data, ignore_time=True)
+
+        assert result is True
+        assert lane.td1_data == device
+        assert unit.logger.messages == [
+            ("debug", f"Data: {td1_data}, Compare_time: {compare_time}"),
+            ("info", f"{lane.name} TD-1 data captured"),
+        ]
+
+    def test_missing_td_skips_apply_even_when_valid(self):
+        unit = _make_unit()
+        lane = _make_td1_lane()
+        compare_time = datetime.now()
+        td1_data = {"SN1": _make_td1_device(td=None)}
+
+        result = unit._apply_td1_data(lane, compare_time, td1_data, ignore_time=True)
+
+        assert result is False
+        assert lane.td1_data is None
+        assert unit.logger.messages == [
+            ("debug", f"Data: {td1_data}, Compare_time: {compare_time}"),
+        ]
+
+    def test_missing_color_skips_apply_even_when_valid(self):
+        unit = _make_unit()
+        lane = _make_td1_lane()
+        compare_time = datetime.now()
+        td1_data = {"SN1": _make_td1_device(color=None)}
+
+        result = unit._apply_td1_data(lane, compare_time, td1_data, ignore_time=True)
+
+        assert result is False
+        assert lane.td1_data is None
+        assert unit.logger.messages == [
+            ("debug", f"Data: {td1_data}, Compare_time: {compare_time}"),
+        ]

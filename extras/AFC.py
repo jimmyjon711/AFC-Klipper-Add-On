@@ -4,12 +4,17 @@
 #
 from __future__ import annotations
 
+import os
 import json
 import re
 import traceback
 import inspect
+import threading
+import chelper
+
 from enum import Enum
 from functools import cached_property
+from queue import Queue
 from configfile import error
 from klippy import Printer
 
@@ -52,7 +57,7 @@ except: raise error(ERROR_STR.format(import_lib="AFC_utils", trace=traceback.for
 try: from extras.AFC_stats import AFCStats
 except: raise error(ERROR_STR.format(import_lib="AFC_stats", trace=traceback.format_exc()))
 
-AFC_VERSION="1.2.6"
+AFC_VERSION="1.2.7"
 
 # Class for holding different states so its clear what all valid states are
 class State(str, Enum):
@@ -77,6 +82,7 @@ def load_config(config):
     return afc(config)
 
 class afc:
+    class sentinel: pass
     def __init__(self, config: ConfigWrapper):
         self.config  = config
         self.printer = config.get_printer()
@@ -84,6 +90,7 @@ class afc:
         self.webhooks = self.printer.load_object(config, 'webhooks')
         self.printer.register_event_handler("klippy:connect",self.handle_connect)
         self.printer.register_event_handler("klippy:ready", self.handle_ready)
+        self.printer.register_event_handler("klippy:disconnect", self.join_threads)
         self.logger  = AFC_logger(self.printer, self)
 
         self.function: afcFunction = self.printer.load_object(config, 'AFC_functions')
@@ -161,6 +168,15 @@ class afc:
         self.unit_order_list        = config.get('unit_order_list','')
         self.VarFile                = config.get('VarFile','../printer_data/config/AFC/AFC.var')# Path to the variables file for AFC configuration.
         self.cfgloc                 = self._remove_after_last(self.VarFile,"/")
+
+        # save_vars() only builds the state dict on the reactor thread; the actual file
+        # write happens on this background thread so a slow disk can't stall Klipper.
+        # A single worker is created rather than a thread per call to keep writes ordered.
+        self._var_write_thread_wait = True
+        self._var_write_queue: Queue = Queue()
+        self._var_write_thread = threading.Thread(target=self._var_write_worker, daemon=True,
+                                                  name="afc_save_vars")
+        self._var_write_thread.start()
         self.default_material_temps = config.getlists("default_material_temps",
                                                       ("default: 235", "PLA:210", "PETG:235", "ABS:235", "ASA:235"))# Default temperature to set extruder when loading/unloading lanes. Material needs to be either manually set or uses material from spoolman if extruder temp is not set in spoolman.
         self.default_material_temps = list(self.default_material_temps) if self.default_material_temps is not None else None
@@ -404,8 +420,10 @@ class afc:
         """
 
         try:
-            self.moonraker = AFC_moonraker( self.moonraker_host, self.moonraker_port, self.logger )
-            if not self.moonraker.wait_for_moonraker( toolhead=self.toolhead, timeout=self.moonraker_connect_to ):
+            self.moonraker = AFC_moonraker(self.moonraker_host, self.moonraker_port, self.logger,
+                                           self.reactor)
+            if not self.moonraker.wait_for_moonraker(toolhead=self.toolhead,
+                                                     timeout=self.moonraker_connect_to):
                 return False
 
             # Remove current lane_data from database before pushing data back up so that
@@ -636,7 +654,12 @@ class afc:
         """
         Print timer callback to check if printer is currently in a print. If printer is in a print,
         current filename is looked up and metadata is pulled from moonraker to get total filament change
-        count and per-tool temperatures. Once this is done timer callback is stopped and unregistered.
+        count and per-tool temperatures.
+
+        Metadata is fetched asynchronously since this reactor timer runs while printing and shouldn't
+        block on the HTTP round trip to moonraker. _finish_print_start runs once it's ready
+        (or immediately if there's no moonraker to query). Once this is done timer callback is
+        stopped and unregistered.
         """
         # Remove timer from reactor
         self.reactor.unregister_timer(self.in_print_timer)
@@ -647,20 +670,36 @@ class afc:
             self.number_of_toolchanges = 0
             if (self.moonraker is not None
                 and self.print_data_metadata):
-                self.print_data_metadata.filename = print_filename
-                self.number_of_toolchanges = self.print_data_metadata.tool_change_count
-                self.print_tool_temperatures = self.print_data_metadata.tool_temperatures
-            self.current_toolchange     = -1 # Reset
-            self.logger.info("Total number of toolchanges set to {}".format(self.number_of_toolchanges))
-
-            # Get current lane and update position to reset fault detection as sometimes
-            # purging in PRINT_START can lead to false positive detections
-            current_lane = self.function.get_current_lane_obj()
-            if current_lane:
-                if current_lane.buffer_obj is not None:
-                    current_lane.buffer_obj.update_filament_error_pos()
+                self.print_data_metadata.query_filename(print_filename,
+                                                        on_fetched=self._finish_print_start)
+            else:
+                self._finish_print_start()
 
         return self.reactor.NEVER
+
+    def _finish_print_start(self) -> None:
+        """
+        Completes print-start moonraker file metadata query: applies the toolchange count and
+        per-tool temperatures cached by print_data_metadata (if a query was made). Resets
+        current_toolchange, and resets the current lane's fault-detection position.
+
+        Runs either immediately from in_print_reactor_timer (no moonraker/print_data_metadata to
+        query) or from the completion callback once print_data_metadata.query_filename()
+        finishes fetching metadata.
+        """
+        if (self.moonraker is not None
+            and self.print_data_metadata):
+            self.number_of_toolchanges = self.print_data_metadata.tool_change_count
+            self.print_tool_temperatures = self.print_data_metadata.tool_temperatures
+        self.current_toolchange     = -1 # Reset
+        self.logger.info("Total number of toolchanges set to {}".format(self.number_of_toolchanges))
+
+        # Get current lane and update position to reset fault detection as sometimes
+        # purging in PRINT_START can lead to false positive detections
+        current_lane = self.function.get_current_lane_obj()
+        if current_lane:
+            if current_lane.buffer_obj is not None:
+                current_lane.buffer_obj.update_filament_error_pos()
 
     def _get_default_material_temps(self, cur_lane):
         """
@@ -1294,12 +1333,74 @@ class afc:
             str["system"]["extruders"][cur_extruder.name]={}
             str["system"]["extruders"][cur_extruder.name]['lane_loaded'] = cur_extruder.lane_loaded
 
+        # Handing off to the background writer thread so a slow disk doesn't
+        # block the reactor; queue.put_nowait never blocks the caller here
+        self._var_write_queue.put_nowait(str)
+
+    def join_threads(self) -> None:
+        """
+        Method is called when a klipper:disconnect happens so that all threads can be cleaned up
+        correctly
+        """
+        self._var_write_queue.put_nowait(self.sentinel)
+        self._var_write_thread_wait = False
+        self._var_write_thread.join()
+        if self.moonraker is not None:
+            self.moonraker.join_thread()
+
+    def _var_write_worker(self) -> None:
+        """
+        Background thread loop that pulls queued save_vars() values and
+        writes them to VarFile.unit file in the order they were queued. Runs for
+        the life of the process (daemon thread) so it needs no explicit shutdown.
+        """
         try:
-            with open(self.VarFile+ '.unit', 'w') as f:
-                f.write(json.dumps(str, indent=4))
+            thread_name = threading.current_thread().name
+            chelper.get_ffi()[1].set_thread_name(thread_name.encode("utf-8"))
+        except:
+            pass
+
+        while self._var_write_thread_wait:
+            data = self._var_write_queue.get()
+            if data is self.sentinel:
+                return
+            self._write_vars_snapshot(data)
+
+    def _write_vars_snapshot(self, data: dict) -> None:
+        """
+        Writes a single save_vars() values to VarFile.unit. Called from the
+        background writer thread, so a slow disk only blocks that thread and
+        not the reactor.
+
+        :param data: Dictionary of lane/unit/system state to write to VarFile.unit
+        """
+        try:
+            # Writing to temp directory first and them renaming to correct file so that a file
+            # does not get half written if klipper decides to crash in the middle of AFC writing
+            # to file.
+            target_file = self.VarFile + '.unit'
+            temp_path = target_file + ".tmp"
+            with open(temp_path, 'w') as f:
+                f.write(json.dumps(data, indent=4))
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_path, target_file)
         except Exception as e:
-            self.logger.error("Error happened when trying to save variables, check AFC.log for error")
-            self.logger.debug(f"Error:{e}\n{traceback.format_exc()}", only_debug=True)
+            err = f"Error:{e}\n{traceback.format_exc()}"
+            # Push back onto the reactor thread before logging: AFC_logger
+            # touches gcode/webhooks state that isn't safe to call from here
+            self.reactor.register_async_callback(
+                lambda et, err=err: self._log_save_vars_error(err))
+
+    def _log_save_vars_error(self, err: str) -> None:
+        """
+        Logs a save_vars file-write failure. Called back on the reactor thread
+        via register_async_callback since the write happens on a background thread.
+
+        :param err: Formatted error/traceback string to log
+        """
+        self.logger.error("Error happened when trying to save variables, check AFC.log for error")
+        self.logger.debug(err, only_debug=True)
 
     # HUB COMMANDS
     cmd_HUB_LOAD_help = "Load lane into hub"
