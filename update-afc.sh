@@ -61,7 +61,8 @@ main() {
   afc_config_dir="${printer_config_dir}/AFC"
   afc_file="${afc_config_dir}/AFC.cfg"
   moonraker_config_file="${moonraker_config_file:-${printer_config_dir}/moonraker.conf}"
-  afc_path="$HOME/AFC-Klipper-Add-On"
+  afc_path="${SCRIPT_DIR}"
+  [[ -d "${afc_path}/.git" ]] || git_install="False"
 
 
   # Perform prerequisite and safety checks, then start the update process

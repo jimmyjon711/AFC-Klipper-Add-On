@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [08-31-2026]
+### Fixed
+- `install-afc.sh` / `update-afc.sh` now resolve the add-on directory from the script's own
+  location (`SCRIPT_DIR`) instead of assuming `~/AFC-Klipper-Add-On`. 
+- The Moonraker `[update_manager afc-software]` block is now written with the actual add-on path
+  rather than a hardcoded `~/AFC-Klipper-Add-On`.
+- `install-afc.sh` no longer ignores the `-m` (Moonraker config path) flag.
+
 ## [2026-08-23]
 ### Added:
 - Added thread for writing vars to file so that slow disks don't have a chance to block on writes which could cause timer too close errors.

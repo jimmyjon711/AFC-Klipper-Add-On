@@ -142,11 +142,14 @@ function copy_snapmaker_config() {
 get_git_version() {
   local git_hash
   local afc_py_version
-  cd "$afc_path" || exit
-	git_hash=$(git -C . rev-parse --short HEAD)
-	afc_py_version=$(grep "AFC_VERSION=" "${afc_path}/extras/AFC.py" | cut -d '=' -f2 | tr -d ' "')
-	afc_version="${afc_py_version}-${git_hash}"
-	cd - > /dev/null || exit
+  afc_py_version=$(grep "AFC_VERSION=" "${afc_path}/extras/AFC.py" | cut -d '=' -f2 | tr -d ' "')
+  if [[ ! -d "${afc_path}/.git" ]]; then
+    # ZIP/archive install: no commit hash to report.
+    afc_version="${afc_py_version}"
+    return 0
+  fi
+  git_hash=$(git -C "${afc_path}" rev-parse --short HEAD)
+  afc_version="${afc_py_version}-${git_hash}"
 }
 
 check_for_uncommitted_changes() {
@@ -167,6 +170,12 @@ check_for_uncommitted_changes() {
 
 clone_and_maybe_restart() {
   if [[ ! -d "${afc_path}/.git" ]]; then
+    if [[ -d "${afc_path}" && -n "$(ls -A "${afc_path}" 2>/dev/null)" ]]; then
+      export git_install="False"
+      print_msg WARNING "AFC-Klipper-Add-On appears to have been installed via ZIP file."
+      print_msg WARNING "Updates are applied by extracting a fresh archive over ${afc_path}."
+      return 0
+    fi
     echo "→ Cloning ${branch} from ${gitrepo} into ${afc_path}…"
     git clone \
       --branch "${branch}" \

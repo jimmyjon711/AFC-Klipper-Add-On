@@ -150,7 +150,23 @@ function update_moonraker_config() {
   #   - MOONRAKER_PATH: The path to the Moonraker installation.
   #   - MOONRAKER_UPDATE_CONFIG: The configuration settings to be added to Moonraker.
 
-  local moonraker_config
+  local moonraker_config afc_repo_path
+
+  afc_repo_path="${afc_path}"
+  if [[ "${afc_repo_path}" == "${HOME}/"* ]]; then
+    afc_repo_path="~${afc_repo_path#"${HOME}"}"
+  fi
+  moonraker_update_config="""
+[update_manager afc-software]
+type: git_repo
+path: ${afc_repo_path}
+origin: $gitrepo
+managed_services: $klipper_service
+primary_branch: main
+is_system_service: False
+info_tags:
+    desc=AFC Klipper Add On
+"""
 
   # Check if the AFC-Klipper-Add-On configuration is already present in the Moonraker config file.
   moonraker_config=$(grep -c '\[update_manager afc-software\]' "${moonraker_config_file}" || true)
