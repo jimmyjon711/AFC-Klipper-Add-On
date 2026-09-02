@@ -167,6 +167,8 @@ check_for_prereqs() {
   if [ ${#missing_dependencies[@]} -ne 0 ]; then
     echo "Missing software prerequisites. Please run the below command and re-run this install script."
     echo "sudo apt-get install -y ${missing_dependencies[*]}"
+    echo "If apt is not available on your machine, please use the applicable package manager or a tool"
+    echo "such as pip. Note, pip cannot be used for jq."
     exit 1
   fi
 }
