@@ -1996,3 +1996,71 @@ class TestCheckTd1IdInData:
         valid, msg = func._check_td1_id_in_data({"SN1": {"error": "jam"}}, "SN1")
         assert valid is False
         assert "jam" in msg
+
+
+# ── AFC_TEST_LANES: park_cmd / verify_macro_positions ─────────────────────────
+# A user who overrides `park_cmd` with their own park macro previously still had
+# the hard-coded `AFC_PARK` macro invoked by the lane test. The test must instead
+# honour `self.afc.park_cmd`, only park when `self.afc.park` is enabled, and skip
+# the run entirely when macro positions have not been configured.
+
+class TestCmdAfcTestLanesParkAndVerify:
+    def _make_loaded(self, func):
+        lane = _make_afc_lane()
+        lane._load_state = True
+        lane.prep_state = True
+        func.afc.lanes = {lane.name: lane}
+        func.afc.current = None
+        return lane
+
+    # cmd_AFC_TEST_LANES: verify_macro_positions guard
+
+    def test_aborts_when_macro_positions_not_set(self):
+        from tests.conftest import MockGCodeCommand
+        func = _make_func()
+        self._make_loaded(func)
+        err = "park is set to True and variable_park_loc_xy has not been updated.\n"
+        func.afc.verify_macro_positions = MagicMock(return_value=err)
+
+        with patch("extras.AFC_functions.AFCprompt") as mocked_prompt:
+            func.cmd_AFC_TEST_LANES(MockGCodeCommand())
+
+        mocked_prompt.assert_not_called()
+        assert ("error", err) in func.logger.messages
+
+    def test_creates_prompt_when_macro_positions_ok(self):
+        from tests.conftest import MockGCodeCommand
+        func = _make_func()
+        self._make_loaded(func)
+        func.afc.verify_macro_positions = MagicMock(return_value="")
+
+        with patch("extras.AFC_functions.AFCprompt") as mocked_prompt:
+            func.cmd_AFC_TEST_LANES(MockGCodeCommand())
+
+        func.afc.verify_macro_positions.assert_called_once_with()
+        mocked_prompt.return_value.create_custom_p.assert_called_once()
+
+    # cmd_TEST_LANE: park invocation
+
+    def _run_test_lane(self, func, park, park_cmd):
+        from tests.conftest import MockGCodeCommand
+        func.afc.park = park
+        func.afc.park_cmd = park_cmd
+        gcmd = MockGCodeCommand(params={"LANE": "lane1", "ITERATION": 0})
+        with patch("extras.AFC_functions.AFCprompt"):
+            func.cmd_TEST_LANE(gcmd)
+
+    def test_parks_with_user_configured_park_cmd(self):
+        func = _make_func()
+        self._run_test_lane(func, park=True, park_cmd="MY_PARK")
+        func.afc.gcode.run_script_from_command.assert_called_once_with("MY_PARK")
+
+    def test_does_not_park_when_park_disabled(self):
+        func = _make_func()
+        self._run_test_lane(func, park=False, park_cmd="MY_PARK")
+        func.afc.gcode.run_script_from_command.assert_not_called()
+
+    def test_does_not_park_when_park_cmd_unset(self):
+        func = _make_func()
+        self._run_test_lane(func, park=True, park_cmd=None)
+        func.afc.gcode.run_script_from_command.assert_not_called()

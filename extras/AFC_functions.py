@@ -1204,6 +1204,11 @@ class afcFunction:
             self.logger.info('Toolhead must be unloaded to run tests.')
             return
 
+        error_str = self.afc.verify_macro_positions()
+        if error_str:
+            self.logger.error(error_str)
+            return
+
         prompt = AFCprompt(gcmd, self.logger)
         buttons = []
         title = 'AFC Test Lanes'
@@ -1269,7 +1274,9 @@ class afcFunction:
         prompt.p_end()
 
         if lane is not None:
-            self.afc.gcode.run_script_from_command('AFC_PARK')
+            if (self.afc.park
+                and self.afc.park_cmd):
+                self.afc.gcode.run_script_from_command(self.afc.park_cmd)
             self.logger.info('Starting test for lane(s): {}'.format(lane))
             lane_obj = self.afc.lanes.get(lane)
             if lane != 'all':
