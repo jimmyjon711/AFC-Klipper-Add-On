@@ -13,9 +13,8 @@ Covers:
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, call
-import pytest
 
 from extras.AFC_unit import afcUnit
 
@@ -79,6 +78,16 @@ def _make_lane(name="lane1", hub="hub1", extruder="ext1", buffer_name="buf1"):
     lane.led_spool_index = None
     lane.current_led_state = ""
     return lane
+
+
+def _make_configured_unit(values: dict[str, object]) -> afcUnit:
+    """Build an afcUnit through its real __init__ so config parsing is
+    exercised. `values` maps config option -> raw value, mimicking what a
+    user wrote in the `[AFC_BoxTurtle ...]` section."""
+    from tests.conftest import MockConfig, MockPrinter
+    printer = MockPrinter()
+    config = MockConfig(name="AFC_BoxTurtle Turtle_1", printer=printer, values=values)
+    return afcUnit(config)
 
 
 # ── __str__ ───────────────────────────────────────────────────────────────────
@@ -1337,3 +1346,29 @@ class TestApplyTd1Data:
         assert unit.logger.messages == [
             ("debug", f"Data: {td1_data}, Compare_time: {compare_time}"),
         ]
+
+
+# ── remember_spool config parsing (issue #806) ───────────────────────────────
+
+class TestRememberSpoolConfig:
+    """Unit-level `remember_spool` must be read as a boolean. It used to be
+    read with `config.get`, which returns the raw string "False" when the
+    option is present; lanes then inherit it via `bool(unit.remember_spool)`
+    and `bool("False")` is True -- silently inverting an explicit opt-out."""
+
+    def test_explicit_false_is_boolean_false(self):
+        unit = _make_configured_unit({"remember_spool": "False"})
+        assert unit.remember_spool is False
+
+    def test_explicit_false_does_not_inherit_as_true(self):
+        """The lane inheritance step: `bool(unit_obj.remember_spool)`."""
+        unit = _make_configured_unit({"remember_spool": "False"})
+        assert bool(unit.remember_spool) is False
+
+    def test_explicit_true_is_boolean_true(self):
+        unit = _make_configured_unit({"remember_spool": "True"})
+        assert unit.remember_spool is True
+
+    def test_absent_option_defaults_to_false(self):
+        unit = _make_configured_unit({})
+        assert unit.remember_spool is False
