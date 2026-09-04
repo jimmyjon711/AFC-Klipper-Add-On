@@ -3257,7 +3257,7 @@ class TestFPSEnableBuffer:
         lane.extruder_obj = MagicMock(th_extruder_name="extruder")
         buf._lane_has_rotation_control = MagicMock(return_value=True)
         buf.fault_detection_enabled = MagicMock(return_value=False)
-        buf._saved_multipliers["extruder"] = ("some_other_lane", 1.08)
+        buf._saved_multipliers[("extruder", lane.name)] = ("some_other_lane", 1.08)
         buf.set_multiplier = MagicMock()
         buf._last_multiplier = 99.0
         buf.enable_buffer(lane)
@@ -3270,10 +3270,12 @@ class TestFPSEnableBuffer:
         lane.extruder_obj = MagicMock(th_extruder_name="extruder")
         buf._lane_has_rotation_control = MagicMock(return_value=True)
         buf.fault_detection_enabled = MagicMock(return_value=False)
-        buf._saved_multipliers["extruder"] = (lane.name, 1.0)
+        buf._saved_multipliers[("extruder", lane.name)] = (lane.name, 1.0)
         buf.set_multiplier = MagicMock()
+        buf._last_multiplier = 99.0
         buf.enable_buffer(lane)
         buf.set_multiplier.assert_not_called()
+        assert buf._last_multiplier == 1.0
 
     def test_has_stepper_with_fault_detection_starts_it(self):
         buf, afc, reactor, printer = _make_fps_buffer()
