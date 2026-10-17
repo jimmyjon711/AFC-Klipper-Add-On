@@ -900,6 +900,7 @@ class AFCSpool:
                      if f"T{i}" not in manually_assigned][:total_lanes]
         for unit in self.afc.units.values():
             for lane in unit.lanes.values():
+                self.logger.info(f"{unit.name}:{lane.name}")
                 lane.map = []
                 # Reassigning manually assigned mapping to lane
                 if lane._map:

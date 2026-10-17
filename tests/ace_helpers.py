@@ -36,7 +36,7 @@ import extras.temperature_ace as temperature_ace_module
 from extras.AFC_ACE import (MAX_PAYLOAD_SIZE, REQUEST_TIMEOUT, ACEConnection, ACESerialError,
                             ACETimeoutError, afcACE)
 from extras.AFC_ACE2 import ACE2Connection, afcACE2
-# Uncomment when bringing in rfid code
+# Uncomment below once RFID and spoolman creation support is added
 # from extras.AFC_ACE2_rfid import AFC_ACE2_RFID, Ace2Link, _Ace2RegLink
 from extras.AFC_lane import AFCLane, AFCLaneState
 from extras.temperature_ace import TemperatureACE
@@ -320,8 +320,8 @@ class FakeAce2(FakeAce):
 #   make_ace_unit() / make_ace2_unit()   afcACE / afcACE2 with real AFCLane lanes
 #   make_fake_ace_connection()    scripted transport under the real wrappers
 #   make_ace_connection()         real ACEConnection / ACE2Connection on FakeSerial
-#   make_ace2_rfid()              AFC_ACE2_RFID bound to an afcACE2
-#   make_ace2_reg_link() / make_ace2_link()   _Ace2RegLink / Ace2Link
+#   (make_ace2_rfid/make_ace2_reg_link/make_ace2_link are commented out below,
+#    pending RFID and spoolman creation support)
 #   make_temperature_ace()        TemperatureACE linked to a unit
 #   make_gcmd()                   a g-code command with Klipper's get semantics
 #   reset_ace_globals() / ace_isolation   reset the ACE modules' process-wide state
@@ -2966,110 +2966,111 @@ def make_ace2_unit(name: str = "Ace2_1", *, lanes: Iterable[Union[str, LaneSpec]
         prep_done=prep_done, connect=connect, clear_records=clear_records)
 
 
-# ── ACE2 RFID ─────────────────────────────────────────────────────────────────
+# Uncomment below once RFID and spoolman creation support is added
+# # ── ACE2 RFID ─────────────────────────────────────────────────────────────────
 
-def make_ace2_rfid(values: Optional[Mapping[str, Any]] = None, *, ace2: Any = DEFAULT,
-                   printer: Optional[AcePrinter] = None, bind: bool = True,
-                   settle: bool = True, clear_records: bool = True,
-                   cls: Optional[type] = None) -> AFC_ACE2_RFID:
-    """
-    Build AFC_ACE2_RFID through its real __init__ as [AFC_ACE2_rfid].
+# def make_ace2_rfid(values: Optional[Mapping[str, Any]] = None, *, ace2: Any = DEFAULT,
+                   # printer: Optional[AcePrinter] = None, bind: bool = True,
+                   # settle: bool = True, clear_records: bool = True,
+                   # cls: Optional[type] = None) -> AFC_ACE2_RFID:
+    # """
+    # Build AFC_ACE2_RFID through its real __init__ as [AFC_ACE2_rfid].
 
-    bind runs its klippy:ready handler (_on_ready) once and drops it: that
-    resolves AFC, finds the afcACE2 by its "AFC_ACE2 <name>" section,
-    registers the tag writers and, with skip_factory_autostage, queues the
-    identify-disable retry (_retry_disable_identify) on the reactor.
+    # bind runs its klippy:ready handler (_on_ready) once and drops it: that
+    # resolves AFC, finds the afcACE2 by its "AFC_ACE2 <name>" section,
+    # registers the tag writers and, with skip_factory_autostage, queues the
+    # identify-disable retry (_retry_disable_identify) on the reactor.
 
-    settle then runs that retry while it is due, without moving the clock. On
-    a connected unit whose link reported its firmware (the default
-    connection's device_info does) it finishes at once: identify is turned
-    off (stock firmware) or kept on (firmware decode). On a unit with no
-    link, a down link or no firmware it re-queues itself for later and stays
-    in reactor.pending; settle=False leaves the first try queued too.
+    # settle then runs that retry while it is due, without moving the clock. On
+    # a connected unit whose link reported its firmware (the default
+    # connection's device_info does) it finishes at once: identify is turned
+    # off (stock firmware) or kept on (firmware decode). On a unit with no
+    # link, a down link or no firmware it re-queues itself for later and stays
+    # in reactor.pending; settle=False leaves the first try queued too.
 
-    :param values: [AFC_ACE2_rfid] options
-    :param ace2: the afcACE2 to bind; DEFAULT builds one, None binds nothing
-    :param printer: shared printer, defaults to ace2's or a new one
-    :param bind: run _on_ready
-    :param settle: run the bind-time identify retry while it is due
-    :param clear_records: clear every record once wiring is done
-    :param cls: AFC_ACE2_RFID class to build, e.g. a test's module copy
-    :return AFC_ACE2_RFID: the reader object
-    """
-    if ace2 is not DEFAULT and ace2 is not None and printer is None:
-        printer = ace2.printer
-    printer = printer if printer is not None else AcePrinter()
-    if ace2 is DEFAULT:
-        ace2 = make_ace2_unit(printer=printer, clear_records=False)
-    if ace2 is not None and ace2.printer is not printer:
-        error_str = "ace2 must be built on the same printer"
-        raise ValueError(error_str)
-    config = AceConfig("AFC_ACE2_rfid", printer, values)
-    obj = (cls or AFC_ACE2_RFID)(config)
-    printer.add_section("AFC_ACE2_rfid", obj, values)
-    if bind:
-        obj._on_ready()
-        printer.remove_event_handler("klippy:ready", obj._on_ready)
-        if settle:
-            retry = getattr(obj, "_retry_disable_identify", None)
-            printer.reactor.run_callbacks(match=lambda entry: entry.callback == retry)
-    if clear_records:
-        printer.clear_records()
-    return obj
-
-
-def make_ace2_reg_link(slot: int = 0, *, ace2: Any = DEFAULT, cls: Optional[type] = None,
-                       **options: Any) -> _Ace2RegLink:
-    """
-    Build an _Ace2RegLink over an afcACE2, so its commands land in the unit's
-    connection (ace2._ace.commands).
-
-    :param slot: reader chip-select index
-    :param ace2: the afcACE2; DEFAULT builds one
-    :param cls: link class to build, e.g. a module copy's _Ace2RegLink
-    :param options: _Ace2RegLink keywords (power_index, reg_timeout, ...)
-    :return _Ace2RegLink: the link
-    """
-    if ace2 is DEFAULT:
-        ace2 = make_ace2_unit()
-    return (cls or _Ace2RegLink)(ace2, slot, **options)
+    # :param values: [AFC_ACE2_rfid] options
+    # :param ace2: the afcACE2 to bind; DEFAULT builds one, None binds nothing
+    # :param printer: shared printer, defaults to ace2's or a new one
+    # :param bind: run _on_ready
+    # :param settle: run the bind-time identify retry while it is due
+    # :param clear_records: clear every record once wiring is done
+    # :param cls: AFC_ACE2_RFID class to build, e.g. a test's module copy
+    # :return AFC_ACE2_RFID: the reader object
+    # """
+    # if ace2 is not DEFAULT and ace2 is not None and printer is None:
+        # printer = ace2.printer
+    # printer = printer if printer is not None else AcePrinter()
+    # if ace2 is DEFAULT:
+        # ace2 = make_ace2_unit(printer=printer, clear_records=False)
+    # if ace2 is not None and ace2.printer is not printer:
+        # error_str = "ace2 must be built on the same printer"
+        # raise ValueError(error_str)
+    # config = AceConfig("AFC_ACE2_rfid", printer, values)
+    # obj = (cls or AFC_ACE2_RFID)(config)
+    # printer.add_section("AFC_ACE2_rfid", obj, values)
+    # if bind:
+        # obj._on_ready()
+        # printer.remove_event_handler("klippy:ready", obj._on_ready)
+        # if settle:
+            # retry = getattr(obj, "_retry_disable_identify", None)
+            # printer.reactor.run_callbacks(match=lambda entry: entry.callback == retry)
+    # if clear_records:
+        # printer.clear_records()
+    # return obj
 
 
-class FakeTransport:
-    """Ace2Link transport: records each frame, answers with .replies in order
-    (last repeats), b"" when none is set."""
+# def make_ace2_reg_link(slot: int = 0, *, ace2: Any = DEFAULT, cls: Optional[type] = None,
+                       # **options: Any) -> _Ace2RegLink:
+    # """
+    # Build an _Ace2RegLink over an afcACE2, so its commands land in the unit's
+    # connection (ace2._ace.commands).
 
-    def __init__(self, *replies: bytes) -> None:
-        """
-        :param replies: response frames
-        """
-        self.frames: List[bytes] = []
-        self.replies: List[bytes] = list(replies)
-
-    def __call__(self, frame: bytes) -> bytes:
-        """
-        :param frame: request frame
-        :return bytes: the next reply
-        """
-        self.frames.append(bytes(frame))
-        if not self.replies:
-            return b""
-        return self.replies.pop(0) if len(self.replies) > 1 else self.replies[0]
+    # :param slot: reader chip-select index
+    # :param ace2: the afcACE2; DEFAULT builds one
+    # :param cls: link class to build, e.g. a module copy's _Ace2RegLink
+    # :param options: _Ace2RegLink keywords (power_index, reg_timeout, ...)
+    # :return _Ace2RegLink: the link
+    # """
+    # if ace2 is DEFAULT:
+        # ace2 = make_ace2_unit()
+    # return (cls or _Ace2RegLink)(ace2, slot, **options)
 
 
-def make_ace2_link(slot: int = 0, *, transport: Optional[Callable[[bytes], bytes]] = None,
-                   ftype: int = 0x0000, cls: Optional[type] = None) -> Ace2Link:
-    """
-    Build an Ace2Link over a recording transport.
+# class FakeTransport:
+    # """Ace2Link transport: records each frame, answers with .replies in order
+    # (last repeats), b"" when none is set."""
 
-    :param slot: reader slot
-    :param transport: frame transport, defaults to a FakeTransport
-    :param ftype: frame type word
-    :param cls: link class to build, e.g. a module copy's Ace2Link
-    :return Ace2Link: the link; its transport is link._tx
-    """
-    return (cls or Ace2Link)(transport if transport is not None else FakeTransport(),
-                             slot=slot, ftype=ftype)
+    # def __init__(self, *replies: bytes) -> None:
+        # """
+        # :param replies: response frames
+        # """
+        # self.frames: List[bytes] = []
+        # self.replies: List[bytes] = list(replies)
+
+    # def __call__(self, frame: bytes) -> bytes:
+        # """
+        # :param frame: request frame
+        # :return bytes: the next reply
+        # """
+        # self.frames.append(bytes(frame))
+        # if not self.replies:
+            # return b""
+        # return self.replies.pop(0) if len(self.replies) > 1 else self.replies[0]
+
+
+# def make_ace2_link(slot: int = 0, *, transport: Optional[Callable[[bytes], bytes]] = None,
+                   # ftype: int = 0x0000, cls: Optional[type] = None) -> Ace2Link:
+    # """
+    # Build an Ace2Link over a recording transport.
+
+    # :param slot: reader slot
+    # :param transport: frame transport, defaults to a FakeTransport
+    # :param ftype: frame type word
+    # :param cls: link class to build, e.g. a module copy's Ace2Link
+    # :return Ace2Link: the link; its transport is link._tx
+    # """
+    # return (cls or Ace2Link)(transport if transport is not None else FakeTransport(),
+                             # slot=slot, ftype=ftype)
 
 
 # ── temperature_ace ───────────────────────────────────────────────────────────
