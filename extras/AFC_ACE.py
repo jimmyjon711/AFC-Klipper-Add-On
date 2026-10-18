@@ -475,41 +475,6 @@ class afcACE(afcUnit):
         # a FIRMWARE_RESTART keeps the process, so _ACE_CLAIMED_PORTS survives.
         self.printer.register_event_handler(
             "klippy:disconnect", self._handle_klippy_disconnect)
-        self._allow_bowden_calibration_on_u1_sensor()
-
-    def _allow_bowden_calibration_on_u1_sensor(self) -> None:
-        """
-        Let AFC's bowden calibration run on an ACE lane whose toolhead has only
-        a U1 filament sensor.
-
-        AFC refuses bowden calibration when the extruder has no pin_tool_start
-        and no buffer to stand in for it. An ACE lane measures to the toolhead
-        sensor itself (_toolhead_sensor_triggered reads the U1 sensor's switch),
-        so for those lanes the check is passed and the rest of the calibration
-        (tool select, park, save) runs as usual. Every other lane gets AFC's own
-        check. Wrapped once, however many ACE units there are.
-        """
-        function = getattr(self.afc, "function", None)
-        check = getattr(function, "_calibration_check_tool_start", None)
-        if check is None or getattr(check, "_ace_u1_sensor", False):
-            return
-
-        def check_tool_start(cur_lane: AFCLane) -> tuple[bool, bool, str]:
-            """
-            Pass an ACE lane whose toolhead has only a U1 filament sensor.
-
-            :param cur_lane: lane being calibrated
-            :return tuple: (failed_check, set_tool_start_back_to_none, msg)
-            """
-            extruder = getattr(cur_lane, "extruder_obj", None)
-            if (isinstance(getattr(cur_lane, "unit_obj", None), afcACE)
-                    and getattr(extruder, "tool_start", None) is None
-                    and getattr(extruder, "fila_tool_start", None) is not None):
-                return False, False, ""
-            return check(cur_lane)
-
-        check_tool_start._ace_u1_sensor = True
-        function._calibration_check_tool_start = check_tool_start
 
     def _handle_klippy_disconnect(self) -> None:
         """
@@ -584,7 +549,7 @@ class afcACE(afcUnit):
             # earlier fights the load feed, which enables assist itself.
             try:
                 at_toolhead = (active_lane is not None
-                               and self._toolhead_sensor_triggered(active_lane))
+                               and active_lane.get_toolhead_pre_sensor_state())
             except Exception:
                 at_toolhead = False
             if (active_lane is not None
@@ -2028,49 +1993,6 @@ class afcACE(afcUnit):
         cur_lane.set_afc_prep_done()
         return succeeded
 
-    def _clear_stale_sensor_state(self, cur_lane: AFCLane) -> None:
-        """
-        Clear stale tool_start_state / filament_present / FPS latch so
-        calibration reads real-time sensor values.
-
-        :param cur_lane: Lane whose toolhead sensor/buffer latch state to clear.
-        """
-        # The U1 toolhead motion sensor is stored by AFC_extruder as
-        # 'fila_tool_start' (when u1_filament_sensor_name is configured);
-        # 'filament_sensor_obj' is never assigned, so fall back to it.
-        sensor_obj = (getattr(cur_lane.extruder_obj, 'filament_sensor_obj', None)
-                      or getattr(cur_lane.extruder_obj, 'fila_tool_start', None))
-        if sensor_obj is not None:
-            sensor_obj.runout_helper.filament_present = False
-        if hasattr(cur_lane.extruder_obj, 'tool_start_state'):
-            cur_lane.extruder_obj.tool_start_state = False
-        buffer_obj = getattr(cur_lane, 'buffer_obj', None)
-        if buffer_obj is not None and hasattr(buffer_obj, 'clear_advance_latch'):
-            buffer_obj.clear_advance_latch()
-        self.afc.reactor.pause(self.afc.reactor.monotonic() + 0.5)
-
-    def _toolhead_sensor_triggered(self, cur_lane: AFCLane) -> bool:
-        """
-        Check if the toolhead sensor is triggered, using the raw hardware
-        button state for U1 motion sensors (which need encoder rotation for
-        filament_present but have a physical switch for static detection).
-
-        :param cur_lane: Lane whose toolhead sensor to check.
-        :return bool: True when the toolhead pre-sensor reports filament.
-        """
-        # With buffer ramming (pin_tool_start: buffer) the buffer is the toolhead
-        # sensor, even when a U1 motion sensor also exists.
-        if getattr(cur_lane.extruder_obj, 'tool_start', None) == "buffer":
-            return cur_lane.get_toolhead_pre_sensor_state()
-        # The U1 toolhead motion sensor is stored by AFC_extruder as
-        # 'fila_tool_start' (when u1_filament_sensor_name is configured);
-        # 'filament_sensor_obj' is never assigned, so fall back to it.
-        sensor_obj = (getattr(cur_lane.extruder_obj, 'filament_sensor_obj', None)
-                      or getattr(cur_lane.extruder_obj, 'fila_tool_start', None))
-        if sensor_obj is not None and hasattr(sensor_obj, 'runout_buttun_state'):
-            return bool(sensor_obj.runout_buttun_state)
-        return cur_lane.get_toolhead_pre_sensor_state()
-
     def _feed_until_sensor(self, slot: int, cur_lane: AFCLane,
                            max_distance: float,
                            step_size: Optional[float] = None) -> tuple:
@@ -2104,7 +2026,7 @@ class afcACE(afcUnit):
             total_fed += step
 
             self.afc.reactor.pause(self.afc.reactor.monotonic() + 0.3)
-            if self._toolhead_sensor_triggered(cur_lane):
+            if cur_lane.get_toolhead_pre_sensor_state():
                 self.logger.info(f"ACE calibration: sensor triggered at {total_fed:.1f}mm")
                 return total_fed, True
 
@@ -2194,9 +2116,9 @@ class afcACE(afcUnit):
         :param slot: 0-based ACE slot index for the lane.
         :return tuple: (success, message, measured_distance).
         """
-        self._clear_stale_sensor_state(cur_lane)
+        cur_lane.extruder_obj.clear_stale_sensor_state(cur_lane)
 
-        if self._toolhead_sensor_triggered(cur_lane):
+        if cur_lane.get_toolhead_pre_sensor_state():
             return False, "Toolhead sensor already triggered, unload first", 0
 
         old_bowden = getattr(cur_hub, 'afc_bowden_length', 0)
@@ -2220,7 +2142,7 @@ class afcACE(afcUnit):
                 self._wait_for_ace_ready(timeout=15.0)
             except Exception as e:
                 self.logger.error(f"ACE calibrate: retract failed: {e}")
-            self._clear_stale_sensor_state(cur_lane)
+            cur_lane.extruder_obj.clear_stale_sensor_state(cur_lane)
             self.afc.reactor.pause(self.afc.reactor.monotonic() + 2.0)
             return False, (
                 f"Toolhead sensor did not trigger after {coarse_distance:.0f}mm. "
@@ -2242,7 +2164,7 @@ class afcACE(afcUnit):
             self.logger.error(f"ACE calibrate: retract failed: {e}")
 
         # Clear sensor state after retract
-        self._clear_stale_sensor_state(cur_lane)
+        cur_lane.extruder_obj.clear_stale_sensor_state(cur_lane)
         self.afc.reactor.pause(self.afc.reactor.monotonic() + 2.0)
 
         # Account for filament already at hub
@@ -2432,7 +2354,7 @@ class afcACE(afcUnit):
         # Pre-feed check: if the toolhead sensor detects filament before
         # we start feeding, there's stuck filament from a previous load.
         # Don't push more filament into an occupied toolhead.
-        if self._toolhead_sensor_triggered(cur_lane):
+        if cur_lane.get_toolhead_pre_sensor_state():
             message = (
                 f"Toolhead sensor detects filament before ACE feed for "
                 f"{cur_lane.name}.\nFilament may be stuck from a previous "
@@ -2461,7 +2383,7 @@ class afcACE(afcUnit):
                                                   (approach, approach_speed))):
                 if (dist < 0.5
                     or (step
-                        and self._toolhead_sensor_triggered(cur_lane))):
+                        and cur_lane.get_toolhead_pre_sensor_state())):
                     continue
                 # A long feed that trips the unit's slip check early (seen on the
                 # first load after an unload) is resent for what it has left,
@@ -2480,7 +2402,7 @@ class afcACE(afcUnit):
                     stalled = stalled or errored
                     if (not errored
                         or attempt == tries - 1
-                        or self._toolhead_sensor_triggered(cur_lane)):
+                        or cur_lane.get_toolhead_pre_sensor_state()):
                         break
                     fed = self._last_feed_length(slot)
                     if fed is not None and 0 < fed < dist:
@@ -2497,7 +2419,7 @@ class afcACE(afcUnit):
                     break
 
             if not success:
-                if self._toolhead_sensor_triggered(cur_lane):
+                if cur_lane.get_toolhead_pre_sensor_state():
                     self.logger.info("Feed error but sensor triggered, continuing")
                 else:
                     success = self._smart_load_retry(cur_lane, slot, feed_dist)
@@ -2516,7 +2438,7 @@ class afcACE(afcUnit):
 
         # If the sensor has not triggered yet, pulse load_retry_pulse mm until it
         # does or load_retry_timeout elapses.
-        if not self._toolhead_sensor_triggered(cur_lane):
+        if not cur_lane.get_toolhead_pre_sensor_state():
             pulse = self.load_retry_pulse
             deadline = self.afc.reactor.monotonic() + self.load_retry_timeout
             pulse_num = 0
@@ -2535,7 +2457,7 @@ class afcACE(afcUnit):
                 except Exception:
                     pass
                 self.afc.reactor.pause(self.afc.reactor.monotonic() + 0.3)
-                if self._toolhead_sensor_triggered(cur_lane):
+                if cur_lane.get_toolhead_pre_sensor_state():
                     self.logger.info(
                         f"Sensor triggered on retry pulse {pulse_num} for {cur_lane.name}")
                     reached = True
@@ -4224,7 +4146,7 @@ class afcACE(afcUnit):
         motor_started = False
         while self.afc.reactor.monotonic() < departure_deadline:
             self.afc.reactor.pause(self.afc.reactor.monotonic() + 0.2)
-            if lane is not None and self._toolhead_sensor_triggered(lane):
+            if lane is not None and lane.get_toolhead_pre_sensor_state():
                 self._stop_feed_at_sensor(slot_index)
                 return True
             try:
@@ -4267,7 +4189,7 @@ class afcACE(afcUnit):
                 for _ in range(max(1, int(poll_interval / SENSOR_POLL_S))):
                     self.afc.reactor.pause(
                         self.afc.reactor.monotonic() + SENSOR_POLL_S)
-                    if self._toolhead_sensor_triggered(lane):
+                    if lane.get_toolhead_pre_sensor_state():
                         reached = True
                         break
                 if reached:
@@ -4319,7 +4241,7 @@ class afcACE(afcUnit):
                 self._wait_for_ace_ready()
                 self._ace.feed_filament(slot, feed_dist, self.feed_speed)
                 self._wait_for_feed_complete(slot, feed_dist, self.feed_speed, cur_lane)
-                if self._toolhead_sensor_triggered(cur_lane):
+                if cur_lane.get_toolhead_pre_sensor_state():
                     return True
             except Exception:
                 pass

@@ -1386,12 +1386,14 @@ class AceExtruder:
 
     def __init__(self, name: str = "extruder", th_extruder_name: Optional[str] = None,
                  tool_start: Optional[str] = "tool_start_pin",
-                 toolhead: Optional[AceToolhead] = None) -> None:
+                 toolhead: Optional[AceToolhead] = None,
+                 reactor: Any = None) -> None:
         """
         :param name: section name
         :param th_extruder_name: physical extruder name, defaults to name
         :param tool_start: pin_tool_start value, or None
         :param toolhead: toolhead whose extruder object to use
+        :param reactor: shared reactor, used by clear_stale_sensor_state's pause
         """
         self.name = name
         self.th_extruder_name = th_extruder_name if th_extruder_name is not None else name
@@ -1412,6 +1414,23 @@ class AceExtruder:
         self.led_index: Optional[str] = None
         self.check_lanes = Recorder()
         self.set_status_led = Recorder()
+        self.reactor = reactor
+
+    def clear_stale_sensor_state(self, lane: Any) -> None:
+        """
+        AFC_extruder.clear_stale_sensor_state stand-in: same real logic,
+        ported here so ACE tests exercise the production method.
+
+        :param lane: AFCLane whose buffer latch state to clear.
+        """
+        if self.fila_tool_start is not None:
+            self.fila_tool_start.runout_helper.filament_present = False
+        self.tool_start_state = False
+        buffer_obj = getattr(lane, 'buffer_obj', None)
+        if (buffer_obj is not None
+            and hasattr(buffer_obj, 'clear_advance_latch')):
+            buffer_obj.clear_advance_latch()
+        self.reactor.pause(self.reactor.monotonic() + 0.5)
 
 
 class FakeHeaters:
@@ -1853,7 +1872,7 @@ class AcePrinter:
         :param options: AceExtruder keywords (th_extruder_name, tool_start)
         :return AceExtruder: the extruder
         """
-        extruder = AceExtruder(name, toolhead=self.toolhead, **options)
+        extruder = AceExtruder(name, toolhead=self.toolhead, reactor=self.reactor, **options)
         self.add_section(f"AFC_extruder {name}", extruder)
         return extruder
 
