@@ -1117,18 +1117,21 @@ class TestCurrentPidSetCommand:
         gcmd = _make_gcmd({"I": 1.0, "D": 1.0})
         with pytest.raises(Exception):
             oams.cmd_OAMS_CURRENT_PID_SET(gcmd)
+        gcmd.error.assert_called_once_with("P value is required")
 
     def test_missing_i_raises(self):
         oams = _make_oams()
         gcmd = _make_gcmd({"P": 1.0, "D": 1.0})
         with pytest.raises(Exception):
             oams.cmd_OAMS_CURRENT_PID_SET(gcmd)
+        gcmd.error.assert_called_once_with("I value is required")
 
     def test_missing_d_raises(self):
         oams = _make_oams()
         gcmd = _make_gcmd({"P": 1.0, "I": 1.0})
         with pytest.raises(Exception):
             oams.cmd_OAMS_CURRENT_PID_SET(gcmd)
+        gcmd.error.assert_called_once_with("D value is required")
 
     def test_default_target_used_when_not_provided(self):
         oams = _make_oams()
@@ -1182,18 +1185,21 @@ class TestPidSetCommand:
         gcmd = _make_gcmd({})
         with pytest.raises(Exception):
             oams.cmd_OAMS_PID_SET(gcmd)
+        gcmd.error.assert_called_once_with("P value is required")
 
     def test_missing_i_raises(self):
         oams = _make_oams()
         gcmd = _make_gcmd({"P": 4.0})
         with pytest.raises(Exception):
             oams.cmd_OAMS_PID_SET(gcmd)
+        gcmd.error.assert_called_once_with("I value is required")
 
     def test_missing_d_raises(self):
         oams = _make_oams()
         gcmd = _make_gcmd({"P": 4.0, "I": 0.1})
         with pytest.raises(Exception):
             oams.cmd_OAMS_PID_SET(gcmd)
+        gcmd.error.assert_called_once_with("D value is required")
 
     def test_sets_pressure_pid_and_default_target(self):
         oams = _make_oams()

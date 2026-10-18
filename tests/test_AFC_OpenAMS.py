@@ -1631,19 +1631,23 @@ class TestOAMSMonitorTick:
 
     def test_desync_stops_monitor(self):
         monitor, reactor, fps = _make_monitor(is_lane_loaded_fn=lambda: False)
-        monitor._running = True
-        monitor._oams = MagicMock()
+        monitor.start(MagicMock())  # arms _timer, like the real desync scenario
         monitor.state.state = FPSLoadState.LOADED
         monitor.state.toolhead_confirmed = True  # was confirmed, now gone
         monitor.state.current_lane = "lane1"  # seed so reset() below is proven
         result = monitor._monitor_tick(100.0)
         assert result == MockReactor.NEVER
         assert monitor._running is False
+        assert monitor._timer is None  # stale timer must be cleared so start() can re-arm
         assert monitor.state.current_lane is None
         assert monitor.state.state == FPSLoadState.UNLOADED
         assert (
             "debug", "FPS_buffer1: lane no longer loaded to toolhead, stopping monitor"
         ) in monitor.logger.messages
+
+        # Re-arming after a desync-stop must actually register a new timer.
+        monitor.start(MagicMock())
+        assert monitor._timer is not None
 
     def test_not_printing_resets_clog_and_idles(self):
         monitor, reactor, fps = _make_monitor(is_printing_fn=lambda: False)
@@ -5467,6 +5471,37 @@ class TestOamsLoad:
         # "stop before load" + "before load" enable + "stop before cleanup"
         # (no retry-reenable pause since max_retries=1 means no next attempt).
         assert afc.reactor.pause.call_count == 3
+
+    def test_transport_failure_runs_same_cleanup_as_engagement_failure(self):
+        """A failed load_spool_with_retry() must not `continue` straight into
+        another load attempt against a possibly still-busy MCU -- it should
+        run the same abort/unload/clear_errors cleanup as an engagement
+        failure before retrying."""
+        oams = MagicMock()
+        oams.determine_current_spool.return_value = None
+        oams.load_spool_with_retry.return_value = (False, "busy")
+        ams, afc, printer, reactor = _make_ams(oams=oams)
+        follower = MagicMock()
+        ams._follower = follower
+        ams._verify_engagement = MagicMock()
+        ams._advance_tool_stn_to_nozzle = MagicMock()
+        ams._wait_for_idle = MagicMock(return_value=True)
+        ams._oams_extrude = MagicMock()
+        afc.reactor.pause = MagicMock()
+        lane = self._lane()
+        lane.extruder_obj.tool_stn_unload = 15.0
+
+        result = ams._oams_load(lane, max_retries=1)
+
+        assert result is False
+        ams._verify_engagement.assert_not_called()
+        oams.abort_current_action.assert_called_once_with(wait=True)
+        oams.unload_spool_with_retry.assert_called_once()
+        oams.clear_errors.assert_called_once()
+        ams._oams_extrude.assert_called_once()
+        assert any(
+            lvl == "info" and "Transport failed attempt 1, cleaning up" in m
+            for lvl, m in ams.logger.messages)
 
     def test_engagement_failure_no_retract_when_tool_stn_unload_zero(self):
         oams = MagicMock()

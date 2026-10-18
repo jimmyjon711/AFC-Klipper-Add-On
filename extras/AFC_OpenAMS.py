@@ -1852,11 +1852,15 @@ class afcAMS(afcUnit):
                 self._wait_for_idle()
                 success, msg = self.oams.load_spool_with_retry(spool_index)
                 if not success:
+                    # Transport itself failed — fall through to the same
+                    # abort/unload/clear_errors cleanup as an engagement
+                    # failure below, instead of retrying straight into a
+                    # possibly still-busy MCU.
                     self.logger.error(f"OAMS load attempt {attempt+1} failed: {msg}")
-                    continue
-
-                # Verify engagement (skip if deferred to AFC's Phase 2)
-                engaged = True if self._defer_engagement else self._verify_engagement(cur_lane)
+                    engaged = False
+                else:
+                    # Verify engagement (skip if deferred to AFC's Phase 2)
+                    engaged = True if self._defer_engagement else self._verify_engagement(cur_lane)
                 if engaged:
                     # Advance filament to the nozzle via tool_stn so a no-poop
                     # load ends at the nozzle (poop, if any, purges from there).
@@ -1883,9 +1887,10 @@ class afcAMS(afcUnit):
 
                     return True
 
-                # Engagement failed — clean up and retry
+                # Transport or engagement failed — clean up and retry
                 self.logger.info(
-                    f"Engagement failed attempt {attempt+1}, cleaning up")
+                    f"{'Transport' if not success else 'Engagement'} failed "
+                    f"attempt {attempt+1}, cleaning up")
 
                 # Disable the follower (enable=0) — do NOT run it in reverse.
                 # The extruder still grips the loaded filament; driving the
@@ -3670,7 +3675,7 @@ class OAMSMonitor:
                 self.logger.debug(
                     f"{self.fps_name}: lane no longer loaded to toolhead, "
                     f"stopping monitor")
-                self._running = False
+                self.stop()
                 self.state.reset()
                 return self.reactor.NEVER
             else:
