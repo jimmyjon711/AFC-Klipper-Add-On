@@ -246,6 +246,7 @@ def pb_decode(data: Union[bytes, bytearray]) -> Dict[int, List[Tuple[int, Any]]]
     """
     fields: Dict[int, Any] = {}
     pos = 0
+    val: Any
     while pos < len(data):
         tag, pos = pb_decode_varint(data, pos)
         fnum, wtype = tag >> 3, tag & 7
@@ -720,7 +721,8 @@ def v2_response_to_v1(cmd: int, seq: int, payload: bytes,
         # Only opcodes in _ERROR_CODE_OPCODES treat field 1 as an error code.
         if cmd in _ERROR_CODE_OPCODES:
             code = _fval(fields, 1, 0)
-            if isinstance(code, int) and code != 0:
+            if (isinstance(code, int)
+                and code != 0):
                 ret['code'] = code
                 ret['msg'] = f"error_{code}"
         # No dedicated decoder for this opcode. Surface the decoded protobuf
@@ -837,7 +839,8 @@ def _ace2_extract_uid(buf: bytearray) -> Optional[Tuple[int, int, int]]:
     :return Optional[Tuple[int, int, int]]: the UID, or None if not found yet
     """
     i = buf.find(PREAMBLE)
-    if i < 0 or len(buf) < i + HEADER_LEN:
+    if (i < 0
+        or len(buf) < i + HEADER_LEN):
         return None
     flags = buf[i + 2]
     cmd = buf[i + 5]
@@ -845,7 +848,8 @@ def _ace2_extract_uid(buf: bytearray) -> Optional[Tuple[int, int, int]]:
     end = i + HEADER_LEN + payload_len + TRAILER_LEN
     if len(buf) < end:
         return None
-    if not (flags & FLAG_RESPONSE) or cmd != Cmd.DISCOVER_DEVICE:
+    if (not (flags & FLAG_RESPONSE)
+        or cmd != Cmd.DISCOVER_DEVICE):
         return None
     payload = bytes(buf[i + HEADER_LEN:i + HEADER_LEN + payload_len])
     try:
@@ -919,10 +923,11 @@ def resolve_ace2_port(ace_index: int, baud: int,
     :return Optional[str]: the port, or None if no matching unit was found
     """
     deadline = time.time() + max(settle, 0.5)
-    found: Dict[str, tuple] = {}
+    found: Dict[str, Tuple[int, int, int]] = {}
     while True:
         for port in _ace2_scan_candidates():
-            if port in _ACE_CLAIMED_PORTS or port in found:
+            if (port in _ACE_CLAIMED_PORTS
+                or port in found):
                 continue
             uid = probe_ace2_uid(port, baud)
             if uid is not None:
@@ -931,7 +936,8 @@ def resolve_ace2_port(ace_index: int, baud: int,
                     # f-string: this can be AFC's logger, whose info() takes
                     # (message, console_only).
                     logger.info(f"ACE2 autodetect: {port} -> uid {uid}")
-                if ace_uid is not None and uid == tuple(ace_uid):
+                if (ace_uid is not None
+                    and uid == tuple(ace_uid)):
                     return port
         if time.time() >= deadline:
             break
@@ -1019,7 +1025,8 @@ class ACE2Connection(ACEConnection):
                                 the device reports a non-zero error code.
         :raises ACETimeoutError: When no response arrives before the deadline.
         """
-        if not self._connected or self._serial is None:
+        if (not self._connected
+            or self._serial is None):
             error_str = "ACE2 not connected"
             raise ACESerialError(error_str)
         # The V2 wire id is 16 bits, so key the pending completion by the masked
@@ -1087,7 +1094,8 @@ class ACE2Connection(ACEConnection):
         :param method: V1 method name to send.
         :param params: Optional dict of method parameters.
         """
-        if not self._connected or self._serial is None:
+        if (not self._connected
+            or self._serial is None):
             return
         # 16-bit wire id (see send_command): track the masked value so the
         # unit's echoed id matches and its reply is recognised, not logged as
@@ -1188,7 +1196,7 @@ class afcACE2(afcACE):
         # Optional per-box pin for serial_port: auto: the STM32 UID from
         # discover_device as "uid1,uid2,uid3" (as in AFC_ACE_serial.log).
         # When omitted, ace_index picks by USB-topology (cable) order.
-        self.ace_uid: Optional[tuple] = None
+        self.ace_uid: Optional[Tuple[int, int, int]] = None
         _uid = config.get("ace_uid", None)
         if _uid:
             parts = tuple(p for p in _uid.replace(",", " ").split() if p)
@@ -1201,7 +1209,8 @@ class afcACE2(afcACE):
                              f"'uid1,uid2,uid3' (copy them from the discover line in "
                              f"AFC_ACE_serial.log); got '{_uid}'")
                 raise config.error(error_str)
-            self.ace_uid = nums
+            uid1, uid2, uid3 = nums
+            self.ace_uid = (uid1, uid2, uid3)
         # ACE 2 Pro V2 serial runs at 230400 baud (the V1 ACE default is
         # 115200); at the wrong baud the unit never sees a valid frame and
         # never replies. Override the inherited default.

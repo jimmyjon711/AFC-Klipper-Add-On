@@ -33,6 +33,9 @@ from typing import Any, Callable, Dict, Optional, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from configfile import ConfigWrapper
+    from extras.AFC import afc
+    from extras.heaters import PrinterHeaters
+    from mcu import MCU
 
 ACE_REPORT_TIME = 1.0  # seconds between samples
 _REGISTERED = False
@@ -121,8 +124,8 @@ class TemperatureACE:
 
         # Try to grab AFC's logger for consistent log output
         try:
-            afc = self.printer.lookup_object("AFC")
-            self._logger = afc.logger
+            afc_obj: afc = self.printer.lookup_object("AFC")
+            self._logger = afc_obj.logger
         except Exception:
             pass
 
@@ -179,8 +182,8 @@ class TemperatureACE:
             or the unit is not (yet) available.
         """
         try:
-            afc = self.printer.lookup_object("AFC")
-            units = getattr(afc, "units", {})
+            afc_obj: afc = self.printer.lookup_object("AFC")
+            units = getattr(afc_obj, "units", {})
             unit = units.get(self.ace_unit_name)
             if unit is not None:
                 return unit
@@ -234,7 +237,8 @@ class TemperatureACE:
                     self.measured_min = min(self.measured_min, self.temp)
                     self.measured_max = max(self.measured_max, self.temp)
 
-                if self.temp > 0 and self.temp < self.min_temp:
+                if (self.temp > 0
+                    and self.temp < self.min_temp):
                     self.printer.invoke_shutdown(
                         f"ACE temperature {self.temp:.1f} below minimum of {self.min_temp:.1f}"
                     )
@@ -251,9 +255,9 @@ class TemperatureACE:
             self.temp = 0.0
 
         if self._callback:
-            mcu = self.printer.lookup_object("mcu")
+            mcu_obj: MCU = self.printer.lookup_object("mcu")
             measured_time = self.reactor.monotonic()
-            self._callback(mcu.estimated_print_time(measured_time), self.temp)
+            self._callback(mcu_obj.estimated_print_time(measured_time), self.temp)
 
         return eventtime + ACE_REPORT_TIME
 
@@ -314,6 +318,7 @@ def _register_sensor_factory(config: "ConfigWrapper") -> None:
     if _REGISTERED:
         return
     printer = config.get_printer()
+    heaters: PrinterHeaters
     try:
         heaters = printer.lookup_object("heaters")
     except Exception:

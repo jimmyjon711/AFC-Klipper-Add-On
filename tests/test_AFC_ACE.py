@@ -835,6 +835,30 @@ class TestAfcACEReconcileFeedAssist:
         assert unit._feed_assist_active == {0}
         assert unit.logger.messages == []
 
+    def test_reconcile_none_name_returns_before_any_slot_map_lookup(self):
+        """None name must hit the dedicated early return, not just happen to
+        fall through to the same no-op as an unresolvable name string: spy on
+        _slot_map.get to prove it is never even called."""
+        class _SpyDict(dict):
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                super().__init__(*args, **kwargs)
+                self.get_calls: list = []
+
+            def get(self, *args: Any, **kwargs: Any) -> Any:
+                self.get_calls.append((args, kwargs))
+                return super().get(*args, **kwargs)
+
+        unit = self._unit(feed_assist_active=[0])
+        spy_slot_map = _SpyDict(unit._slot_map)
+        unit._slot_map = spy_slot_map
+
+        unit._reconcile_feed_assist(None)
+
+        assert spy_slot_map.get_calls == []
+        assert unit._ace.commands == []
+        assert unit._feed_assist_active == {0}
+        assert unit.logger.messages == []
+
 
 class TestAfcACEHandleReady:
     def test_seeds_hub_state_and_schedules_deferred_connect(self):
@@ -1123,6 +1147,15 @@ class TestAfcACEWatchForAce:
 class TestAfcACEFinishConnect:
     #: _finish_connect's log sequence for an unprepped lane1 with no failures.
     CONNECTED = TestAfcACEDeferredAceConnect.CONNECTED
+
+    def test_no_connection_returns_before_logging_or_firing_connected_event(self):
+        unit = ace_p1_unit("lane1")
+        unit._ace = None
+
+        unit._finish_connect()
+
+        assert unit.logger.messages == []
+        assert unit.printer.events == []
 
     def test_enable_rfid_failure_is_logged_and_connect_continues(self):
         unit = ace_p1_unit("lane1")
@@ -2547,6 +2580,29 @@ class TestAfcACECaptureTd1Data:
 
 
 class TestAfcACECaptureTd1DataInner:
+    def test_no_connection_returns_before_any_feed(self):
+        unit = ace_p1_unit(LaneSpec("lane0", prep=True, load=True,
+                                    values={"td1_bowden_length": 300}))
+        lane = unit.lanes["lane0"]
+        unit._ace = None
+
+        ok, msg = unit._capture_td1_data_inner(lane, 0)
+
+        assert (ok, msg) == (False, "ACE not connected")
+        assert unit.logger.messages == []
+
+    def test_missing_bowden_length_returns_before_any_feed(self):
+        unit = ace_p1_unit(LaneSpec("lane0", prep=True, load=True))
+        lane = unit.lanes["lane0"]
+        lane.td1_bowden_length = None
+        wire = AceP1Wire(unit)
+
+        ok, msg = unit._capture_td1_data_inner(lane, 0)
+
+        assert (ok, msg) == (False, "td1_bowden_length not set for lane0")
+        assert wire.moves() == []
+        assert unit.logger.messages == []
+
     def test_captures_when_get_td1_succeeds(self, monkeypatch):
         unit, lane, fetch = ace_p1_td1_unit(monkeypatch, loaded_to_hub=True,
                                             td1_bowden_length=300)
@@ -2849,6 +2905,16 @@ class TestAfcACEFeedToHubProbing:
         :return tuple: the feed command to slot 3 at full speed
         """
         return ("feed_filament", {"index": 3, "length": length, "speed": 100.0})
+
+    def test_no_connection_returns_false_before_any_event_or_feed(self):
+        unit, lane, wire = self._unit()
+        unit._ace = None
+
+        assert unit._feed_to_hub_probing(lane, 3, dist_hub=200.0) is False
+
+        assert wire.moves() == []
+        assert unit.printer.events == []
+        assert unit.logger.messages == []
 
     def test_no_listener_is_plain_dist_hub_feed(self):
         unit, lane, wire = self._unit()
@@ -3567,6 +3633,16 @@ class TestAfcACEFeedUntilSensor:
         """
         return ("feed_filament", {"index": 0, "length": length, "speed": 100.0})
 
+    def test_no_connection_returns_zero_fed_and_not_triggered(self):
+        unit, lane, wire = self._unit(trigger_after=1)
+        unit._ace = None
+
+        result = unit._feed_until_sensor(0, lane, 100.0, step_size=50.0)
+
+        assert result == (0.0, False)
+        assert wire.moves() == []
+        assert unit.logger.messages == []
+
     def test_triggers_on_first_step(self):
         unit, lane, wire = self._unit(trigger_after=1)
 
@@ -3743,6 +3819,16 @@ class TestAfcACECalibrateBowdenInner:
         result = unit._calibrate_bowden_inner(lane, lane.hub_obj, 0)
 
         assert result == (False, "Toolhead sensor already triggered, unload first", 0)
+        assert wire.moves() == []
+        assert unit.logger.messages == []
+
+    def test_no_connection_returns_before_clearing_sensor_state(self):
+        unit, lane, wire = self._unit(trigger_at=None)
+        unit._ace = None
+
+        result = unit._calibrate_bowden_inner(lane, lane.hub_obj, 0)
+
+        assert result == (False, "ACE not connected", 0.0)
         assert wire.moves() == []
         assert unit.logger.messages == []
 
@@ -5252,6 +5338,12 @@ class TestAfcACEParseAceParams:
     def test_trailing_comma_leaves_no_empty_pair(self):
         assert afcACE._parse_ace_params("{index:0,}") == {"index": 0}
 
+    def test_valid_json_non_dict_falls_through_to_bare_key_parser(self):
+        """A JSON list is valid JSON but not a params dict, so send_command's
+        params=... contract requires falling through to the bare-key parser
+        (which finds no k:v pairs here) instead of returning the list as-is."""
+        assert afcACE._parse_ace_params("[1,2,3]") is None
+
 
 class TestAfcACECmdACECmd:
     def test_not_connected(self):
@@ -5604,6 +5696,14 @@ class TestAfcACEPickTestSlot:
 
 
 class TestAfcACEPollUntilStatus:
+    def test_no_connection_returns_false_without_polling(self):
+        unit = ace_p2_unit()
+        unit._ace = None
+
+        assert unit._poll_until_status(True, timeout=1.0) is False
+        assert unit.printer.reactor.now == 100.0
+        assert unit.printer.logger.messages == []
+
     def test_matches_ready(self):
         unit = ace_p2_unit()
         unit._ace.set_reply("get_status", {"status": "ready"})
@@ -6173,6 +6273,20 @@ class TestAfcACEDryRotate:
         assert gcmd.messages[-1] == (
             "info", "ACE_DRY: rotating free spools on Ace_1 every 300s "
                     "(lane1, lane2, lane3, lane4)")
+
+
+class TestAfcACEDryRotateSpin:
+    def test_no_connection_returns_before_any_unwind(self):
+        unit = ace_p2_unit("lane1", "lane2", "lane4")
+        wire = AceDryRotateWire(unit, "empty", "empty", "empty")
+        unit.cmd_ACE_DRY(make_gcmd(TEMP=50.0, DURATION=240.0, ROTATE=1))
+        wire.link.commands.clear()
+        unit._ace = None
+
+        unit._dry_rotate_spin(unit._dry_rotate_timer)
+
+        assert wire.unwinds() == []
+        assert unit.logger.messages == []
 
 
 class TestAfcACEDryRotateHoldReason:
@@ -7343,9 +7457,60 @@ class TestAfcACESlotIsMoving:
         assert ace_p2_unit()._slot_is_moving(hw, 0) is False
 
 
+class TestAfcACELastFeedLength:
+    def test_no_connection_returns_none(self):
+        unit = ace_p2_unit()
+        unit._ace = None
+
+        assert unit._last_feed_length(3) is None
+
+    def test_returns_length_for_slot(self):
+        unit = ace_p2_unit()
+        unit._ace.set_reply("get_feed_info", {"feed_info": [
+            {"length": 10.0}, {"length": 20.0}, {"length": 30.0}, {"length": 40.0}]})
+
+        assert unit._last_feed_length(3) == 40.0
+
+    def test_slot_out_of_range_returns_none(self):
+        unit = ace_p2_unit()
+        unit._ace.set_reply("get_feed_info", {"feed_info": [{"length": 10.0}]})
+
+        assert unit._last_feed_length(3) is None
+
+    def test_send_command_exception_returns_none(self):
+        unit = ace_p2_unit()
+        unit._ace.set_reply("get_feed_info", RuntimeError("down"))
+
+        assert unit._last_feed_length(3) is None
+
+
+class TestAfcACEFeedAttempt:
+    def test_no_connection_returns_before_any_feed(self):
+        unit = ace_p2_unit()
+        unit._ace = None
+
+        assert unit._ace_feed_attempt(3, 100.0, 25.0, None) == (False, False)
+
+    def test_feed_without_error_returns_not_errored_and_success(self):
+        unit = ace_p2_unit()
+        AceP2Wire(unit)
+
+        errored, success = unit._ace_feed_attempt(3, 100.0, 25.0, None)
+
+        assert (errored, success) == (False, True)
+
+
 class TestAfcACEStopFeedAtSensor:
     FEEDING = {"status": "busy", "slots": [{}, {}, {}, {"status": "feeding"}]}
     IDLE = {"status": "ready", "slots": [{}, {}, {}, {"status": "ready"}]}
+
+    def test_no_connection_returns_before_any_command(self):
+        unit = ace_p2_unit()
+        unit._ace = None
+
+        unit._stop_feed_at_sensor(3)
+
+        assert unit.printer.logger.messages == []
 
     def test_stop_at_the_sensor_is_resent_until_confirmed(self):
         # A stop inside the unit's ~250 ms setup window is dropped, so it is resent.
@@ -7598,6 +7763,16 @@ class TestAfcACEWaitForFeedComplete:
 
 
 class TestAfcACESmartLoadRetry:
+    def test_no_connection_returns_false_without_feeding(self):
+        unit = ace_p2_unit("lane1")
+        lane = unit.lanes["lane1"]
+        wire = AceP2Wire(unit)
+        unit._ace = None
+
+        assert unit._smart_load_retry(lane, 0, 100.0) is False
+        assert wire.moves() == []
+        assert unit.printer.logger.messages == []
+
     def test_succeeds_when_sensor_triggers(self):
         unit = ace_p2_unit("lane1")
         lane = unit.lanes["lane1"]
@@ -9638,6 +9813,17 @@ class TestACEConnectionHandleRead:
             :return bytes: never returns
             """
             raise self.error
+
+    def test_no_serial_returns_before_reading(self):
+        conn = ace_p2_connection()
+        conn._last_rx_time = 50.0
+        conn._serial = None
+
+        conn._handle_read(101.0)
+
+        assert conn._read_buffer == b""
+        assert conn._last_rx_time == 50.0
+        assert conn._logger.messages == []
 
     def test_no_data_returns(self):
         conn = ace_p2_connection()
