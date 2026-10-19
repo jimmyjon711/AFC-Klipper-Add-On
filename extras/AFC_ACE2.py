@@ -1,6 +1,6 @@
 # AFCProject Automated Filament Changer
 #
-# Copyright (C) 2024-2026 AFCProject
+# Copyright (C) 2026 AFCProject
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 #
@@ -517,22 +517,20 @@ def _decode_status(fields: Dict[int, List[Tuple[int, Any]]]) -> Dict[str, Any]:
             # consumers (e.g. _derive_action's slot tag) can name the slot.
             'index': len(slots),
             # Any non-empty filament state means present ('identified' needs an
-            # RFID read); RFID identification was carried separately in 'rfid'.
+            # RFID read); RFID identification is carried separately in 'rfid'.
             'status': 'empty' if filament_state == 'empty' else 'ready',
             'slot_status': slot_state,
-            # Uncomment below once RFID and spoolman creation support is added
-            # 'sku': '', 'type': '',
-            # 'rfid': 2 if filament_state == 'identified' else 0,
-            # 'brand': '',
-            # 'color': [0, 0, 0],
+            'sku': '', 'type': '',
+            'rfid': 2 if filament_state == 'identified' else 0,
+            'brand': '',
+            'color': [0, 0, 0],
         })
     while len(slots) < 4:
         slots.append({
             'index': len(slots),
             'status': 'empty', 'slot_status': 'unknown',
-            # Uncomment below once RFID and spoolman creation support is added
-            # 'sku': '', 'type': '', 'rfid': 0, 'brand': '',
-            # 'color': [0, 0, 0],
+            'sku': '', 'type': '', 'rfid': 0, 'brand': '',
+            'color': [0, 0, 0],
         })
     dry_status = {'status': 'stop', 'target_temp': 0,
                   'duration': 0, 'remain_time': 0}
@@ -701,8 +699,7 @@ def v2_response_to_v1(cmd: int, seq: int, payload: bytes,
             'sku': _fstr(fields, 3, ''),
             'type': ftype, 'brand': '', 'color': color,
             'colors_rgba': colors_rgba,
-            # Uncomment below once RFID and spoolman creation support is added
-            # 'rfid': 2 if ftype else 0,
+            'rfid': 2 if ftype else 0,
             # diameter is uint32 in 0.01mm units. Field 11 is a static tag value
             # surfaced as total_length (mm), not a live remaining.
             'diameter': _fval(fields, 8, 0) / 100.0,
@@ -1146,22 +1143,21 @@ class ACE2Connection(ACEConnection):
     # The Pro 2 enables RFID per-slot (V1's global enable_rfid/disable_rfid don't
     # exist). Best-effort enable/disable all slots; fire-and-forget so connect
     # never blocks on it.
-    # Uncomment below once RFID and spoolman creation support is added
-    # def enable_rfid(self) -> None:
-    #     """
-    #     Best-effort enable per-slot RFID identification on every slot.
-    #     """
-    #     for slot in range(self.slot_count):
-    #         self.send_command_async(
-    #             "set_rfid_enable", {"index": slot, "enable": True})
-    #
-    # def disable_rfid(self) -> None:
-    #     """
-    #     Best-effort disable per-slot RFID identification on every slot.
-    #     """
-    #     for slot in range(self.slot_count):
-    #         self.send_command_async(
-    #             "set_rfid_enable", {"index": slot, "enable": False})
+    def enable_rfid(self) -> None:
+        """
+        Best-effort enable per-slot RFID identification on every slot.
+        """
+        for slot in range(self.slot_count):
+            self.send_command_async(
+                "set_rfid_enable", {"index": slot, "enable": True})
+
+    def disable_rfid(self) -> None:
+        """
+        Best-effort disable per-slot RFID identification on every slot.
+        """
+        for slot in range(self.slot_count):
+            self.send_command_async(
+                "set_rfid_enable", {"index": slot, "enable": False})
 
 
 # ── Unit: the V1 ACE unit with the V2 transport swapped in ───────────
@@ -1358,18 +1354,17 @@ class afcACE2(afcACE):
                               logger=logger, baud_rate=baud_rate,
                               ace_index=self.ace_index, ace_uid=self.ace_uid)
 
-    # Uncomment below once RFID and spoolman creation support is added
-    # def _reader_sibling_slot(self, slot: int) -> Optional[int]:
-    #     """
-    #     ACE 2 Pro has 2 MFRC522 readers, each covering a slot pair (0/1 -> r0,
-    #     2/3 -> r1). The paired slot shares the reader, so a static read of one can
-    #     return the other's tag, used to skip ambiguous startup RFID reads.
-    #
-    #     :param slot: 0-based slot index
-    #     :return Optional[int]: the slot sharing this slot's reader, or None
-    #     """
-    #     sib = int(slot) ^ 1
-    #     return sib if 0 <= sib < self.SLOTS_PER_UNIT else None
+    def _reader_sibling_slot(self, slot: int) -> Optional[int]:
+        """
+        ACE 2 Pro has 2 MFRC522 readers, each covering a slot pair (0/1 -> r0,
+        2/3 -> r1). The paired slot shares the reader, so a static read of one can
+        return the other's tag, used to skip ambiguous startup RFID reads.
+
+        :param slot: 0-based slot index
+        :return Optional[int]: the slot sharing this slot's reader, or None
+        """
+        sib = int(slot) ^ 1
+        return sib if 0 <= sib < self.SLOTS_PER_UNIT else None
 
     # No _refresh_slot_inventory override: the ACE 2 reads tags host-side over the
     # MFRC522 passthrough (AFC_ACE2_rfid), and _uses_firmware_rfid = False gates

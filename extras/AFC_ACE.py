@@ -1,6 +1,6 @@
 # AFCProject Automated Filament Changer
 #
-# Copyright (C) 2024-2026 AFCProject
+# Copyright (C) 2026 AFCProject
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
@@ -51,7 +51,9 @@ try: from extras.AFC_unit import afcUnit
 except:
     error_str = ERROR_STR.format(import_lib="AFC_unit", trace=traceback.format_exc())
     raise error(error_str)
-
+# Uncomment below for real RFID integration
+apply_filament_defaults = None
+rgb_array_to_hex = None
 # Uncomment below once RFID and spoolman creation support is added
 # try:
 #     from extras.AFC_RFID import (
@@ -417,12 +419,11 @@ class afcACE(afcUnit):
              "Enable/disable ACE stuck spool detection"),
             ('ACE_FEED_INFO', self.cmd_ACE_FEED_INFO,
              "Per-slot feed diagnostics (steps/length/encoder) for feed-check tuning"),
-            # Uncomment below once RFID and spoolman creation support is added
-            # ('ACE_RFID_DUMP', self.cmd_ACE_RFID_DUMP,
-            #  "Dump full raw RFID/filament-info read for a slot"),
-            # ('ACE_RFID_RESCAN', self.cmd_ACE_RFID_RESCAN,
-            #  "Read a lane's spool tag again and apply it to the lane (ACE 2: "
-            #  "turns the spool past the reader; V1: asks the firmware)"),
+            ('ACE_RFID_DUMP', self.cmd_ACE_RFID_DUMP,
+             "Dump full raw RFID/filament-info read for a slot"),
+            ('ACE_RFID_RESCAN', self.cmd_ACE_RFID_RESCAN,
+             "Read a lane's spool tag again and apply it to the lane (ACE 2: "
+             "turns the spool past the reader; V1: asks the firmware)"),
             ('ACE_FAN', self.cmd_ACE_FAN,
              "Set ACE unit fan speed (ACE2: 0-100%; V1: ignored by firmware)"),
         ):
@@ -719,14 +720,13 @@ class afcACE(afcUnit):
             f"ACE {self.name}: connected, mode={self.mode}, "
             f"port={self.serial_port}, slots={self.SLOTS_PER_UNIT}")
 
-        # Uncomment below once RFID and spoolman creation support is added
-        # # Enable RFID reader so get_filament_info returns spool data
-        # try:
-        #     self._ace.enable_rfid()
-        #     self.logger.debug(f"ACE {self.name}: RFID enabled")
-        # except Exception as e:
-        #     self.logger.warning(
-        #         f"ACE {self.name}: enable_rfid failed (non-fatal): {e}")
+        # Enable RFID reader so get_filament_info returns spool data
+        try:
+            self._ace.enable_rfid()
+            self.logger.debug(f"ACE {self.name}: RFID enabled")
+        except Exception as e:
+            self.logger.warning(
+                f"ACE {self.name}: enable_rfid failed (non-fatal): {e}")
 
         # Apply encoder feed-check tuning (ACE2 only; base is a no-op).
         self._apply_feed_check()
@@ -736,7 +736,8 @@ class afcACE(afcUnit):
         self._wait_for_ace_ready(timeout=self.prep_ready_timeout)
 
         # Seed slot status from a single get_status (covers all 4 slots, which is
-        # all we need for prep/loaded state).
+        # all we need for prep/loaded state). Per-slot RFID detail is pulled by
+        # _sync_inventory below, now that the unit is idle.
         try:
             hw_status = self._ace.get_status(timeout=3.0)
             if isinstance(hw_status, dict):
@@ -747,10 +748,8 @@ class afcACE(afcUnit):
         except Exception as e:
             self.logger.debug(f"ACE initial get_status failed: {e}")
 
-        # Uncomment below once RFID and spoolman creation support is added
-        # # Sync RFID data
-        # self._sync_inventory()
-        # Sync lane loaded states
+        # Sync RFID data and lane loaded states
+        self._sync_inventory()
         self._sync_slot_loaded_state()
 
         # Re-baseline on the first heartbeat, or every 'ready' slot would read as
@@ -950,8 +949,7 @@ class afcACE(afcUnit):
             slots.append({
                 "index": i,
                 "status": inv.get("status", ""),
-                # Uncomment below once RFID and spoolman creation support is added
-                # "rfid": inv.get("rfid"),
+                "rfid": inv.get("rfid"),
                 "sku": inv.get("sku", ""),
                 "material": inv.get("material", ""),
                 "uid": inv.get("uid", ""),
@@ -1304,12 +1302,10 @@ class afcACE(afcUnit):
 
     def on_filament_insert(self, lane: AFCLane) -> None:
         """
-        ACE-specific insertion: restores a staged/remembered spool id and
-        runs the base insertion handling. RFID inventory refresh and spool
-        defaults/Spoolman sync are disabled (see comments below) until that
-        support is added.
+        ACE-specific insertion: refresh RFID inventory, apply spool defaults, sync to spoolman.
 
-        :param lane: Lane whose slot had filament inserted; a freshly
+        :param lane: Lane whose slot had filament inserted; its RFID inventory
+            is refreshed, filament defaults/Spoolman are applied, a freshly
             staged or remembered spool id is restored, and the base
             on_filament_insert is then called.
         """
@@ -1324,18 +1320,17 @@ class afcACE(afcUnit):
         self.afc.spool.clear_values(lane)
         # V1 ACE identifies the spool through the firmware here; the ACE 2 reads
         # the tag host-side (AFC_ACE2_rfid) on the post_insert event instead.
-        # Uncomment below once RFID and spoolman creation support is added
-        # if self._uses_firmware_rfid:
-        #     self._refresh_slot_inventory(slot)
-        #     slot_info = self._slot_inventory[slot]
-        #     if apply_filament_defaults is not None:
-        #         apply_filament_defaults(
-        #             lane, slot_info,
-        #             color_converter=rgb_array_to_hex,
-        #             afc_defaults={
-        #                 "default_material_type": getattr(self.afc, "default_material_type", None),
-        #                 "default_color": getattr(self.afc, "default_color", None),
-        #             })
+        if self._uses_firmware_rfid:
+            self._refresh_slot_inventory(slot)
+            slot_info = self._slot_inventory[slot]
+            if apply_filament_defaults is not None:
+                apply_filament_defaults(
+                    lane, slot_info,
+                    color_converter=rgb_array_to_hex,
+                    afc_defaults={
+                        "default_material_type": getattr(self.afc, "default_material_type", None),
+                        "default_color": getattr(self.afc, "default_color", None),
+                    })
             # V1 ACE does not create/match Spoolman: SKUs aren't unique and the
             # reader has no per-tag UID, so only the tag values are applied.
         # If the ACE slot had no RFID identity of its own (lane.spool_id still
@@ -1346,6 +1341,11 @@ class afcACE(afcUnit):
             and (staged_spool_id is not None
                  or lane.remember_spool)):
             self.afc.spool.set_spoolID(lane, saved_spool_id)
+        else:
+            # No saved spool to restore, and apply_filament_defaults is disabled
+            # (see top of file): fall back to _set_values' material/weight
+            # defaulting until real RFID/Spoolman identification is wired back in.
+            self.afc.spool._set_values(lane)
         self.lane_illuminate_spool(lane)
         self._hub_load_suppressed.discard(lane.name)
         self.afc.save_vars()
@@ -1366,15 +1366,14 @@ class afcACE(afcUnit):
 
     def on_filament_remove(self, lane: AFCLane) -> None:
         """
-        ACE-specific removal: clear hub state.
+        ACE-specific removal: clear slot inventory and hub state.
 
-        :param lane: Lane whose slot was emptied; its loaded-to-hub state is
-            cleared.
+        :param lane: Lane whose slot was emptied; its cached RFID inventory and
+            loaded-to-hub state are cleared.
         """
-        # Uncomment below once RFID and spoolman creation support is added
-        # slot = self._get_slot(lane.name)
-        # if slot < self.SLOTS_PER_UNIT:
-        #     self._clear_slot_inventory(slot)
+        slot = self._get_slot(lane.name)
+        if slot < self.SLOTS_PER_UNIT:
+            self._clear_slot_inventory(slot)
         self._hub_load_suppressed.discard(lane.name)
         lane.loaded_to_hub = False
         self._set_hub_state(lane, False)
@@ -1685,8 +1684,7 @@ class afcACE(afcUnit):
         if self._unit_load_to_hub is not None:
             load_to_hub = self._unit_load_to_hub
         else:
-            load_to_hub = getattr(lane, 'load_to_hub',
-                                  getattr(self.afc, 'load_to_hub', False))
+            load_to_hub = getattr(lane, 'load_to_hub', getattr(self.afc, 'load_to_hub', False))
         if not load_to_hub or lane.loaded_to_hub:
             return
         if not lane.prep_state:
@@ -1719,9 +1717,8 @@ class afcACE(afcUnit):
                     lane.loaded_to_hub = True
                     self._set_hub_state(lane, True)
                     self.afc.save_vars()
-                    self.logger.info(
-                        f"ACE prep_post_load: {lane.name} staged at hub "
-                        f"(dist_hub={dist_hub:.0f}mm)")
+                    self.logger.info(f"ACE prep_post_load: {lane.name} staged at hub "
+                                     f"(dist_hub={dist_hub:.0f}mm)")
                     # Capture TD-1 data now that filament is at hub
                     if (lane.td1_when_loaded
                         and lane.td1_device_id
@@ -1941,18 +1938,17 @@ class afcACE(afcUnit):
                 msg += "<span class=success--text> AND LOADED</span>"
                 self.lane_illuminate_spool(cur_lane)
 
-                # Uncomment below once RFID and spoolman creation support is added
-                # # Apply RFID data if available and not already set
-                # if apply_filament_defaults is not None:
-                #     slot_info = self._slot_inventory[slot] if slot < self.SLOTS_PER_UNIT else {}
-                #     apply_filament_defaults(
-                #         cur_lane, slot_info,
-                #         color_converter=rgb_array_to_hex,
-                #         afc_defaults={
-                #             "default_material_type": getattr(
-                #                 self.afc, "default_material_type", None),
-                #             "default_color": getattr(self.afc, "default_color", None),
-                #         })
+                # Apply RFID data if available and not already set
+                if apply_filament_defaults is not None:
+                    slot_info = self._slot_inventory[slot] if slot < self.SLOTS_PER_UNIT else {}
+                    apply_filament_defaults(
+                        cur_lane, slot_info,
+                        color_converter=rgb_array_to_hex,
+                        afc_defaults={
+                            "default_material_type": getattr(
+                                self.afc, "default_material_type", None),
+                            "default_color": getattr(self.afc, "default_color", None),
+                        })
 
                 # Assume filament staged at hub on startup
                 if not cur_lane.tool_loaded and not cur_lane.loaded_to_hub:
@@ -2389,7 +2385,14 @@ class afcACE(afcUnit):
                 # first load after an unload) is resent for what it has left,
                 # rather than leaving the rest to the short retry pulses.
                 tries = 1 + (LOAD_FEED_ERROR_RESENDS if not step else 0)
-                for attempt in range(tries):
+
+                def _feed_attempt() -> bool:
+                    """
+                    Run one feed_filament + wait_for_feed_complete attempt.
+
+                    :return bool: True when the error was a feed_error (stall).
+                    """
+                    nonlocal success, stalled
                     self._wait_for_ace_ready()
                     self._ace.feed_filament(slot, dist, speed)
                     success = self._wait_for_feed_complete(
@@ -2400,8 +2403,15 @@ class afcACE(afcUnit):
                     errored = (getattr(self, "_last_move_error", None)
                                == "feed_error")
                     stalled = stalled or errored
+                    return errored
+
+                # The retriable attempts (all but the last): bail out early on
+                # success/sensor-trigger, otherwise shrink dist to what's left
+                # and resend. The final attempt is unconditional, below, so
+                # this loop only ever exits by break, never by exhaustion.
+                for _ in range(tries - 1):
+                    errored = _feed_attempt()
                     if (not errored
-                        or attempt == tries - 1
                         or cur_lane.get_toolhead_pre_sensor_state()):
                         break
                     fed = self._last_feed_length(slot)
@@ -2413,6 +2423,11 @@ class afcACE(afcUnit):
                         f"ACE load: {cur_lane.name} hit a feed error"
                         + (f" after {fed:.0f}mm" if fed else "")
                         + f", feeding the remaining {dist:.0f}mm again")
+                else:
+                    # Either tries == 1 (no retries configured) or every
+                    # retriable attempt above errored out: this is the last
+                    # chance, win or lose.
+                    _feed_attempt()
                 # A failed fast feed goes to the full-length resends below;
                 # the short approach would pass and hide it.
                 if not success:
@@ -2748,121 +2763,120 @@ class afcACE(afcUnit):
             lines.append(f"  slot {i}: {fi.get('steps', 0)} / {length} / {decoder} / {ratio:.3f}")
         gcmd.respond_info("\n".join(lines))
 
-    # Uncomment below once RFID and spoolman creation support is added
-    # def cmd_ACE_RFID_DUMP(self, gcmd: GCodeCommand) -> None:
-        # """
-        # Dump the full raw RFID/filament-info read for a slot, every protobuf
-        # field, not just the sku/type/color we normally use. The ACE 2 carries
-        # more than the ACE Pro: e.g. diameter (field 8, 0.01mm units), remaining
-        # length (field 11), and the raw tag strings. Defaults to slot 0.
+    def cmd_ACE_RFID_DUMP(self, gcmd: GCodeCommand) -> None:
+        """
+        Dump the full raw RFID/filament-info read for a slot, every protobuf
+        field, not just the sku/type/color we normally use. The ACE 2 carries
+        more than the ACE Pro: e.g. diameter (field 8, 0.01mm units), remaining
+        length (field 11), and the raw tag strings. Defaults to slot 0.
 
-        # Usage
-        # -------
-        # `ACE_RFID_DUMP UNIT=<unit> [SLOT=<0-based slot>] [LANE=<lane>]`
+        Usage
+        -------
+        `ACE_RFID_DUMP UNIT=<unit> [SLOT=<0-based slot>] [LANE=<lane>]`
 
-        # Example
-        # -------
-        # ```
-        # ACE_RFID_DUMP UNIT=Ace2_1 SLOT=1
-        # ```
-        # """
-        # if not self._ace or not self._ace.connected:
-            # gcmd.respond_info("ACE not connected")
-            # return
-        # slot = gcmd.get_int('SLOT', None)
-        # if slot is None:
-            # lane_name = gcmd.get('LANE', None)
-            # slot = (self._get_slot(lane_name)
-                    # if lane_name and lane_name in self.afc.lanes else 0)
-        # try:
-            # result = self._ace.send_command('get_filament_info', {'index': slot})
-        # except Exception as e:
-            # gcmd.respond_info(f"Error reading ACE RFID slot {slot}: {e}")
-            # return
-        # result = result or {}
-        # raw = result.get('raw')
-        # parsed = {k: v for k, v in result.items() if k != 'raw'}
-        # lines = [f"ACE RFID slot {slot}:", f"  parsed: {parsed}"]
-        # if raw is not None:
-            # lines.append(f"  raw protobuf fields (field#: value): {raw}")
-        # else:
-            # lines.append("  (no raw field map, V1 ACE Pro or empty read)")
-        # gcmd.respond_info("\n".join(lines))
+        Example
+        -------
+        ```
+        ACE_RFID_DUMP UNIT=Ace2_1 SLOT=1
+        ```
+        """
+        if not self._ace or not self._ace.connected:
+            gcmd.respond_info("ACE not connected")
+            return
+        slot = gcmd.get_int('SLOT', None)
+        if slot is None:
+            lane_name = gcmd.get('LANE', None)
+            slot = (self._get_slot(lane_name)
+                    if lane_name and lane_name in self.afc.lanes else 0)
+        try:
+            result = self._ace.send_command('get_filament_info', {'index': slot})
+        except Exception as e:
+            gcmd.respond_info(f"Error reading ACE RFID slot {slot}: {e}")
+            return
+        result = result or {}
+        raw = result.get('raw')
+        parsed = {k: v for k, v in result.items() if k != 'raw'}
+        lines = [f"ACE RFID slot {slot}:", f"  parsed: {parsed}"]
+        if raw is not None:
+            lines.append(f"  raw protobuf fields (field#: value): {raw}")
+        else:
+            lines.append("  (no raw field map, V1 ACE Pro or empty read)")
+        gcmd.respond_info("\n".join(lines))
 
-    # #: How long a V1 rescan waits for the firmware to finish recognizing a tag.
-    # RESCAN_RECOGNIZE_S = 5.0
+    #: How long a V1 rescan waits for the firmware to finish recognizing a tag.
+    RESCAN_RECOGNIZE_S = 5.0
 
-    # def cmd_ACE_RFID_RESCAN(self, gcmd: GCodeCommand) -> None:
-        # """
-        # Read a lane's spool tag again and apply it to the lane.
+    def cmd_ACE_RFID_RESCAN(self, gcmd: GCodeCommand) -> None:
+        """
+        Read a lane's spool tag again and apply it to the lane.
 
-        # ACE 2: the host drives the MFRC522 reader, so [AFC_ACE2_rfid] winds the
-        # filament back, feeds it past the reader, winds back to where the tag
-        # went past, reads it at rest and feeds the lane back where it was.
-        # Needs the lane staged and not in the toolhead, and no print running.
+        ACE 2: the host drives the MFRC522 reader, so [AFC_ACE2_rfid] winds the
+        filament back, feeds it past the reader, winds back to where the tag
+        went past, reads it at rest and feeds the lane back where it was.
+        Needs the lane staged and not in the toolhead, and no print running.
 
-        # V1 ACE: the firmware owns the reader and the host cannot poll it, so
-        # nothing moves: the slot's tag is asked of the firmware
-        # (get_filament_info) and, when recognized, replaces the lane's material,
-        # color and temperatures. Allowed on the lane in the toolhead.
+        V1 ACE: the firmware owns the reader and the host cannot poll it, so
+        nothing moves: the slot's tag is asked of the firmware
+        (get_filament_info) and, when recognized, replaces the lane's material,
+        color and temperatures. Allowed on the lane in the toolhead.
 
-        # Usage
-        # -------
-        # `ACE_RFID_RESCAN UNIT=<unit> LANE=<lane> [DIST=<mm>] [SPEED=<mm/s>]`
+        Usage
+        -------
+        `ACE_RFID_RESCAN UNIT=<unit> LANE=<lane> [DIST=<mm>] [SPEED=<mm/s>]`
 
-        # Example
-        # -------
-        # ```
-        # ACE_RFID_RESCAN UNIT=Ace2_1 LANE=lane2
-        # ```
-        # """
-        # lane_name = gcmd.get('LANE')
-        # lane = self.lanes.get(lane_name)
-        # if lane is None:
-            # error_str = f"{lane_name} is not a lane of {self.name}"
-            # raise gcmd.error(error_str)
-        # if not self._uses_firmware_rfid:
-            # rfid = self.printer.lookup_object("AFC_ACE2_rfid", None)
-            # if rfid is None or getattr(rfid, "ace2", None) is not self:
-                # error_str = (f"ACE_RFID_RESCAN on {self.name} needs "
-                             # f"[AFC_ACE2_rfid] bound to this unit")
-                # raise gcmd.error(error_str)
-            # rfid.rescan_lane(lane_name, gcmd)
-            # return
-        # if self._ace is None or not self._ace.connected:
-            # error_str = "ACE not connected"
-            # raise gcmd.error(error_str)
-        # slot = self._get_slot(lane_name)
-        # if not 0 <= slot < self.SLOTS_PER_UNIT:
-            # error_str = f"{lane_name} has no ACE slot"
-            # raise gcmd.error(error_str)
-        # # rfid 3 is "recognizing": give the firmware a moment to finish.
-        # deadline = self.reactor.monotonic() + self.RESCAN_RECOGNIZE_S
-        # while True:
-            # self._refresh_slot_inventory(slot)
-            # inv = self._slot_inventory[slot]
-            # if (inv.get("rfid") != 3
-                # or self.reactor.monotonic() >= deadline):
-                # break
-            # self.reactor.pause(self.reactor.monotonic() + 0.5)
-        # if inv.get("rfid") != 2:
-            # state = {0: "no tag found", 1: "tag not recognized",
-                     # 3: "still recognizing"}.get(inv.get("rfid"), "no tag read")
-            # gcmd.respond_info(
-                # f"ACE {self.name}: {state} on {lane_name} (slot {slot})")
-            # return
-        # # The tag the firmware reads now wins over what the lane showed.
-        # lane.material = ""
-        # lane.color = ""
-        # lane.extruder_temp = None
-        # lane.bed_temp = None
-        # if apply_filament_defaults is not None:
-            # apply_filament_defaults(lane, inv, color_converter=rgb_array_to_hex)
-        # self.afc.save_vars()
-        # gcmd.respond_info(
-            # f"ACE {self.name}: read {lane_name}'s tag: "
-            # f"{inv.get('brand') or ''} {lane.material or '?'} "
-            # f"{lane.color or ''}".replace("  ", " "))
+        Example
+        -------
+        ```
+        ACE_RFID_RESCAN UNIT=Ace2_1 LANE=lane2
+        ```
+        """
+        lane_name = gcmd.get('LANE')
+        lane = self.lanes.get(lane_name)
+        if lane is None:
+            error_str = f"{lane_name} is not a lane of {self.name}"
+            raise gcmd.error(error_str)
+        if not self._uses_firmware_rfid:
+            rfid = self.printer.lookup_object("AFC_ACE2_rfid", None)
+            if rfid is None or getattr(rfid, "ace2", None) is not self:
+                error_str = (f"ACE_RFID_RESCAN on {self.name} needs "
+                             f"[AFC_ACE2_rfid] bound to this unit")
+                raise gcmd.error(error_str)
+            rfid.rescan_lane(lane_name, gcmd)
+            return
+        if self._ace is None or not self._ace.connected:
+            error_str = "ACE not connected"
+            raise gcmd.error(error_str)
+        slot = self._get_slot(lane_name)
+        if not 0 <= slot < self.SLOTS_PER_UNIT:
+            error_str = f"{lane_name} has no ACE slot"
+            raise gcmd.error(error_str)
+        # rfid 3 is "recognizing": give the firmware a moment to finish.
+        deadline = self.reactor.monotonic() + self.RESCAN_RECOGNIZE_S
+        while True:
+            self._refresh_slot_inventory(slot)
+            inv = self._slot_inventory[slot]
+            if (inv.get("rfid") != 3
+                or self.reactor.monotonic() >= deadline):
+                break
+            self.reactor.pause(self.reactor.monotonic() + 0.5)
+        if inv.get("rfid") != 2:
+            state = {0: "no tag found", 1: "tag not recognized",
+                     3: "still recognizing"}.get(inv.get("rfid"), "no tag read")
+            gcmd.respond_info(
+                f"ACE {self.name}: {state} on {lane_name} (slot {slot})")
+            return
+        # The tag the firmware reads now wins over what the lane showed.
+        lane.material = ""
+        lane.color = ""
+        lane.extruder_temp = None
+        lane.bed_temp = None
+        if apply_filament_defaults is not None:
+            apply_filament_defaults(lane, inv, color_converter=rgb_array_to_hex)
+        self.afc.save_vars()
+        gcmd.respond_info(
+            f"ACE {self.name}: read {lane_name}'s tag: "
+            f"{inv.get('brand') or ''} {lane.material or '?'} "
+            f"{lane.color or ''}".replace("  ", " "))
 
     @staticmethod
     def _parse_ace_params(raw: Optional[str]) -> Optional[dict]:
@@ -3110,13 +3124,13 @@ class afcACE(afcUnit):
 
     def _pick_test_slot(self) -> Optional[int]:
         """
-        First slot the firmware reports as loaded (status == 'ready').
+        First slot that reports a recognized tag / SKU (a loaded spool).
 
         :return Optional[int]: The slot index of the first loaded spool, or None if none.
         """
         for slot in range(self.SLOTS_PER_UNIT):
             inv = self._slot_inventory[slot]
-            if inv.get("status", "") == "ready":
+            if inv.get("rfid") in (2, 3) or inv.get("sku"):
                 return slot
         return None
 
@@ -3697,10 +3711,6 @@ class afcACE(afcUnit):
                     self.logger.debug(
                         f"Feed assist slot {slot} not permitted yet "
                         f"(FORBIDDEN); watchdog will retry: {e}")
-                elif 'error_2' in msg or 'code=2' in msg:
-                    self.logger.debug(
-                        f"Feed assist slot {slot} refused (error_2, "
-                        f"concurrent-assist limit or slot state); leaving off")
                 else:
                     self.logger.error(
                         f"Failed to start feed assist slot {slot}: {e}")
@@ -4334,155 +4344,154 @@ class afcACE(afcUnit):
 
     # ── RFID / Spoolman helpers ──
 
-    # Uncomment below once RFID and spoolman creation support is added
-    # def _sync_inventory(self) -> None:
-        # """
-        # Pull RFID/NFC filament data from ACE hardware into slot cache.
+    def _sync_inventory(self) -> None:
+        """
+        Pull RFID/NFC filament data from ACE hardware into slot cache.
 
-        # V1 ACE only. The ACE 2 reads tags host-side over the MFRC522
-        # passthrough (AFC_ACE2_rfid), so it skips the firmware get_filament_info
-        # sweep entirely (_uses_firmware_rfid is False).
-        # """
-        # if not self._uses_firmware_rfid:
-            # return
-        # if self._ace is None or not self._ace.connected:
-            # return
-        # for slot in range(self.SLOTS_PER_UNIT):
-            # try:
-                # info = self._ace.get_filament_info(slot)
-                # if isinstance(info, dict):
-                    # self._store_slot_rfid(slot, info)
-            # except Exception as e:
-                # self.logger.debug(
-                    # f"ACE {self.name}: slot {slot} inventory query failed: {e}")
+        V1 ACE only. The ACE 2 reads tags host-side over the MFRC522
+        passthrough (AFC_ACE2_rfid), so it skips the firmware get_filament_info
+        sweep entirely (_uses_firmware_rfid is False).
+        """
+        if not self._uses_firmware_rfid:
+            return
+        if self._ace is None or not self._ace.connected:
+            return
+        for slot in range(self.SLOTS_PER_UNIT):
+            try:
+                info = self._ace.get_filament_info(slot)
+                if isinstance(info, dict):
+                    self._store_slot_rfid(slot, info)
+            except Exception as e:
+                self.logger.debug(
+                    f"ACE {self.name}: slot {slot} inventory query failed: {e}")
 
-    # def _store_slot_rfid(self, slot: int, info: dict) -> None:
-        # """
-        # Store RFID fields from a get_filament_info response into slot cache.
+    def _store_slot_rfid(self, slot: int, info: dict) -> None:
+        """
+        Store RFID fields from a get_filament_info response into slot cache.
 
-        # The FilamentInfo payload carries index, sku, brand, type, color[],
-        # extruder_temp{min,max}, hotbed_temp{min,max}, diameter, rfid and source,
-        # plus weight (total/current). It has no per-tag UID, so V1 identity comes
-        # from the SKU. The full raw dict is kept (and debug-logged).
+        The FilamentInfo payload carries index, sku, brand, type, color[],
+        extruder_temp{min,max}, hotbed_temp{min,max}, diameter, rfid and source,
+        plus weight (total/current). It has no per-tag UID, so V1 identity comes
+        from the SKU. The full raw dict is kept (and debug-logged).
 
-        # :param slot: 0-based ACE slot index to store data for.
-        # :param info: get_filament_info response dict for the slot.
-        # """
-        # inv = self._slot_inventory[slot]
-        # prev_raw = inv.get("raw")
-        # inv["raw"] = info
-        # changed = info != prev_raw
-        # if changed:
-            # self.logger.debug(
-                # f"ACE {self.name}: slot {slot} get_filament_info -> {info}")
-        # inv["material"] = info.get("material", info.get("type", ""))
-        # inv["color"] = info.get("color", [0, 0, 0])
-        # inv["sku"] = info.get("sku", "")
-        # inv["brand"] = info.get("brand", "")
-        # inv["diameter"] = info.get("diameter", 1.75)
-        # inv["total_weight"] = info.get("total", 0)
-        # inv["current_weight"] = info.get("current", 0)
-        # # RFID recognition state (RfidStatus):
-        # #   rfid:   0 not-found, 1 unrecognized, 2 recognized, 3 recognizing
-        # # 'source' is in the documented protocol but not returned by this firmware.
-        # inv["rfid"] = info.get("rfid")
-        # inv["source"] = info.get("source")
-        # # Keep the full min/max temperature ranges AND a derived single value.
-        # ext_temp = info.get("extruder_temp", {})
-        # bed_temp = info.get("hotbed_temp", {})
-        # if isinstance(ext_temp, dict):
-            # inv["extruder_temp_min"] = ext_temp.get("min")
-            # inv["extruder_temp_max"] = ext_temp.get("max")
-            # if ext_temp.get("min") and ext_temp.get("max"):
-                # inv["extruder_temp"] = (ext_temp["min"] + ext_temp["max"]) // 2
-            # elif ext_temp.get("max"):
-                # inv["extruder_temp"] = ext_temp["max"]
-            # else:
-                # inv["extruder_temp"] = None
-        # else:
-            # inv["extruder_temp"] = None
-            # inv["extruder_temp_min"] = inv["extruder_temp_max"] = None
-        # if isinstance(bed_temp, dict):
-            # inv["bed_temp_min"] = bed_temp.get("min")
-            # inv["bed_temp_max"] = bed_temp.get("max")
-            # if bed_temp.get("min") and bed_temp.get("max"):
-                # inv["bed_temp"] = (bed_temp["min"] + bed_temp["max"]) // 2
-            # elif bed_temp.get("max"):
-                # inv["bed_temp"] = bed_temp["max"]
-            # else:
-                # inv["bed_temp"] = None
-        # else:
-            # inv["bed_temp"] = inv["bed_temp_min"] = inv["bed_temp_max"] = None
-        # # Log a real tag read once per change, not every poll.
-        # if changed and (inv.get("rfid") in (2, 3) or inv.get("sku")):
-            # self.logger.info(
-                # f"ACE {self.name}: slot {slot} RFID read, "
-                # f"sku={inv.get('sku')!r} brand={inv.get('brand')!r} "
-                # f"type={inv.get('material')!r} rfid={inv.get('rfid')} "
-                # f"nozzle={inv.get('extruder_temp_min')}-{inv.get('extruder_temp_max')}C")
+        :param slot: 0-based ACE slot index to store data for.
+        :param info: get_filament_info response dict for the slot.
+        """
+        inv = self._slot_inventory[slot]
+        prev_raw = inv.get("raw")
+        inv["raw"] = info
+        changed = info != prev_raw
+        if changed:
+            self.logger.debug(
+                f"ACE {self.name}: slot {slot} get_filament_info -> {info}")
+        inv["material"] = info.get("material", info.get("type", ""))
+        inv["color"] = info.get("color", [0, 0, 0])
+        inv["sku"] = info.get("sku", "")
+        inv["brand"] = info.get("brand", "")
+        inv["diameter"] = info.get("diameter", 1.75)
+        inv["total_weight"] = info.get("total", 0)
+        inv["current_weight"] = info.get("current", 0)
+        # RFID recognition state (RfidStatus):
+        #   rfid:   0 not-found, 1 unrecognized, 2 recognized, 3 recognizing
+        # 'source' is in the documented protocol but not returned by this firmware.
+        inv["rfid"] = info.get("rfid")
+        inv["source"] = info.get("source")
+        # Keep the full min/max temperature ranges AND a derived single value.
+        ext_temp = info.get("extruder_temp", {})
+        bed_temp = info.get("hotbed_temp", {})
+        if isinstance(ext_temp, dict):
+            inv["extruder_temp_min"] = ext_temp.get("min")
+            inv["extruder_temp_max"] = ext_temp.get("max")
+            if ext_temp.get("min") and ext_temp.get("max"):
+                inv["extruder_temp"] = (ext_temp["min"] + ext_temp["max"]) // 2
+            elif ext_temp.get("max"):
+                inv["extruder_temp"] = ext_temp["max"]
+            else:
+                inv["extruder_temp"] = None
+        else:
+            inv["extruder_temp"] = None
+            inv["extruder_temp_min"] = inv["extruder_temp_max"] = None
+        if isinstance(bed_temp, dict):
+            inv["bed_temp_min"] = bed_temp.get("min")
+            inv["bed_temp_max"] = bed_temp.get("max")
+            if bed_temp.get("min") and bed_temp.get("max"):
+                inv["bed_temp"] = (bed_temp["min"] + bed_temp["max"]) // 2
+            elif bed_temp.get("max"):
+                inv["bed_temp"] = bed_temp["max"]
+            else:
+                inv["bed_temp"] = None
+        else:
+            inv["bed_temp"] = inv["bed_temp_min"] = inv["bed_temp_max"] = None
+        # Log a real tag read once per change, not every poll.
+        if changed and (inv.get("rfid") in (2, 3) or inv.get("sku")):
+            self.logger.info(
+                f"ACE {self.name}: slot {slot} RFID read, "
+                f"sku={inv.get('sku')!r} brand={inv.get('brand')!r} "
+                f"type={inv.get('material')!r} rfid={inv.get('rfid')} "
+                f"nozzle={inv.get('extruder_temp_min')}-{inv.get('extruder_temp_max')}C")
 
-    # def _refresh_slot_inventory(self, slot: int) -> None:
-        # """
-        # Fetch fresh RFID data for a single slot from ACE hardware.
-        # (get_filament_info already returns current tag data on this firmware.)
+    def _refresh_slot_inventory(self, slot: int) -> None:
+        """
+        Fetch fresh RFID data for a single slot from ACE hardware.
+        (get_filament_info already returns current tag data on this firmware.)
 
-        # :param slot: 0-based ACE slot index to refresh.
-        # """
-        # if self._ace is None or not self._ace.connected:
-            # return
-        # if slot < 0 or slot >= self.SLOTS_PER_UNIT:
-            # return
-        # try:
-            # info = self._ace.get_filament_info(slot)
-            # if isinstance(info, dict):
-                # self._store_slot_rfid(slot, info)
-        # except Exception as e:
-            # self.logger.debug(
-                # f"ACE {self.name}: slot {slot} RFID refresh failed: {e}")
+        :param slot: 0-based ACE slot index to refresh.
+        """
+        if self._ace is None or not self._ace.connected:
+            return
+        if slot < 0 or slot >= self.SLOTS_PER_UNIT:
+            return
+        try:
+            info = self._ace.get_filament_info(slot)
+            if isinstance(info, dict):
+                self._store_slot_rfid(slot, info)
+        except Exception as e:
+            self.logger.debug(
+                f"ACE {self.name}: slot {slot} RFID refresh failed: {e}")
 
-    # def _clear_slot_inventory(self, slot: int) -> None:
-        # """
-        # Clear cached RFID data for a slot.
+    def _clear_slot_inventory(self, slot: int) -> None:
+        """
+        Clear cached RFID data for a slot.
 
-        # :param slot: 0-based ACE slot index to clear.
-        # """
-        # if 0 <= slot < self.SLOTS_PER_UNIT:
-            # self._slot_inventory[slot]["material"] = ""
-            # self._slot_inventory[slot]["color"] = [0, 0, 0]
-            # # Defensively drop any per-spool UID so a removed spool's can't linger.
-            # self._slot_inventory[slot].pop("uid", None)
+        :param slot: 0-based ACE slot index to clear.
+        """
+        if 0 <= slot < self.SLOTS_PER_UNIT:
+            self._slot_inventory[slot]["material"] = ""
+            self._slot_inventory[slot]["color"] = [0, 0, 0]
+            # Defensively drop any per-spool UID so a removed spool's can't linger.
+            self._slot_inventory[slot].pop("uid", None)
 
-    # def _reader_sibling_slot(self, slot: int) -> Optional[int]:
-        # """
-        # Physical slot sharing this slot's RFID reader, or None. The base ACE
-        # assumes a per-slot reader (no sharing); subclasses whose readers cover a
-        # slot pair override this.
+    def _reader_sibling_slot(self, slot: int) -> Optional[int]:
+        """
+        Physical slot sharing this slot's RFID reader, or None. The base ACE
+        assumes a per-slot reader (no sharing); subclasses whose readers cover a
+        slot pair override this.
 
-        # :param slot: 0-based slot index
-        # :return Optional[int]: the sibling slot, always None here
-        # """
-        # return None
+        :param slot: 0-based slot index
+        :return Optional[int]: the sibling slot, always None here
+        """
+        return None
 
-    # def _shared_rfid_ambiguous(self, slot: int) -> bool:
-        # """
-        # True when a slot's static RFID read can't be trusted because its
-        # shared-reader sibling reports the same tag. Only a spinning read (on
-        # insert) can disambiguate, so a static startup read must not apply it.
+    def _shared_rfid_ambiguous(self, slot: int) -> bool:
+        """
+        True when a slot's static RFID read can't be trusted because its
+        shared-reader sibling reports the same tag. Only a spinning read (on
+        insert) can disambiguate, so a static startup read must not apply it.
 
-        # :param slot: 0-based slot index
-        # :return bool: True if the read is ambiguous
-        # """
-        # sib = self._reader_sibling_slot(slot)
-        # if sib is None or not (0 <= sib < self.SLOTS_PER_UNIT):
-            # return False
-        # me = self._slot_inventory[slot]
-        # other = self._slot_inventory[sib]
-        # sku = (me.get("sku") or "").strip()
-        # osku = (other.get("sku") or "").strip()
-        # if sku and sku == osku:
-            # return True
-        # uid, ouid = me.get("uid"), other.get("uid")
-        # return bool(uid and uid == ouid)
+        :param slot: 0-based slot index
+        :return bool: True if the read is ambiguous
+        """
+        sib = self._reader_sibling_slot(slot)
+        if sib is None or not (0 <= sib < self.SLOTS_PER_UNIT):
+            return False
+        me = self._slot_inventory[slot]
+        other = self._slot_inventory[sib]
+        sku = (me.get("sku") or "").strip()
+        osku = (other.get("sku") or "").strip()
+        if sku and sku == osku:
+            return True
+        uid, ouid = me.get("uid"), other.get("uid")
+        return bool(uid and uid == ouid)
 
     def _sync_slot_loaded_state(self) -> None:
         """
@@ -4501,27 +4510,26 @@ class afcACE(afcUnit):
                     lane.loaded_to_hub = False
                     self._set_hub_state(lane, False)
 
-                # Uncomment below once RFID and spoolman creation support is added
-                # # A shared-reader slot's static read can be the neighbour's tag, so
-                # # leave identification to the persisted spool or an insert read.
-                # if self._shared_rfid_ambiguous(slot):
-                #     self.logger.info(
-                #         f"ACE {self.name}: slot {slot} RFID read is ambiguous "
-                #         f"(shared reader sibling reports the same tag), not "
-                #         f"applying to {lane.name} at startup")
-                #     continue
-                #
-                # if apply_filament_defaults is not None:
-                #     apply_filament_defaults(
-                #         lane, slot_info,
-                #         color_converter=rgb_array_to_hex,
-                #         afc_defaults={
-                #             "default_material_type": getattr(
-                #                 self.afc, "default_material_type", None),
-                #             "default_color": getattr(self.afc, "default_color", None),
-                #         })
-                #
-                # # V1 ACE does not create/match Spoolman (see on_filament_insert).
+                # A shared-reader slot's static read can be the neighbour's tag, so
+                # leave identification to the persisted spool or an insert read.
+                if self._shared_rfid_ambiguous(slot):
+                    self.logger.info(
+                        f"ACE {self.name}: slot {slot} RFID read is ambiguous "
+                        f"(shared reader sibling reports the same tag), not "
+                        f"applying to {lane.name} at startup")
+                    continue
+
+                if apply_filament_defaults is not None:
+                    apply_filament_defaults(
+                        lane, slot_info,
+                        color_converter=rgb_array_to_hex,
+                        afc_defaults={
+                            "default_material_type": getattr(
+                                self.afc, "default_material_type", None),
+                            "default_color": getattr(self.afc, "default_color", None),
+                        })
+
+                # V1 ACE does not create/match Spoolman (see on_filament_insert).
 
     # V1 ACE does not sync to Spoolman: its SKUs aren't unique per spool. ACE2
     # syncs by unique tag UID via AFC_ACE2_rfid.
@@ -5638,20 +5646,19 @@ class ACEConnection:
         """
         return self.send_command("get_temp", timeout=timeout)
 
-    # Uncomment below once RFID and spoolman creation support is added
-    # def get_filament_info(self, slot_index: int, timeout: float = 3.0) -> Any:
-    #     """
-    #     Get RFID/NFC filament data for a specific slot (0-based).
-    #
-    #     :param slot_index: 0-based slot index.
-    #     :param timeout: Seconds to wait for the response.
-    #     :return Any: The filament-info result payload.
-    #     """
-    #     return self.send_command(
-    #         "get_filament_info",
-    #         params={"index": slot_index},
-    #         timeout=timeout,
-    #     )
+    def get_filament_info(self, slot_index: int, timeout: float = 3.0) -> Any:
+        """
+        Get RFID/NFC filament data for a specific slot (0-based).
+
+        :param slot_index: 0-based slot index.
+        :param timeout: Seconds to wait for the response.
+        :return Any: The filament-info result payload.
+        """
+        return self.send_command(
+            "get_filament_info",
+            params={"index": slot_index},
+            timeout=timeout,
+        )
 
     def get_material_info(self, slot_index: int, timeout: float = 3.0) -> Any:
         """
@@ -5848,44 +5855,42 @@ class ACEConnection:
         """
         return self.send_command("drying_stop")
 
-    # Uncomment below once RFID and spoolman creation support is added
-    # def enable_rfid(self) -> Any:
-    #     """
-    #     Enable RFID/NFC tag detection.
-    #
-    #     :return Any: The response result payload.
-    #     """
-    #     return self.send_command("enable_rfid")
-    #
-    # def disable_rfid(self) -> Any:
-    #     """
-    #     Disable RFID/NFC tag detection.
-    #
-    #     :return Any: The response result payload.
-    #     """
-    #     return self.send_command("disable_rfid")
+    def enable_rfid(self) -> Any:
+        """
+        Enable RFID/NFC tag detection.
+
+        :return Any: The response result payload.
+        """
+        return self.send_command("enable_rfid")
+
+    def disable_rfid(self) -> Any:
+        """
+        Disable RFID/NFC tag detection.
+
+        :return Any: The response result payload.
+        """
+        return self.send_command("disable_rfid")
 
     # ---- Commands from Anycubic's ACE protocol ----
     # set_filament_info works (code 0); other protocol methods return 400
     # InvalidCommand on this firmware, so probe with ACE_CMD before adding wrappers.
 
-    # Uncomment below once RFID and spoolman creation support is added
-    # def set_filament_info(self, slot_index: int, filament_type: str,
-    #                       color_rgb: Any) -> Any:
-    #     """
-    #     Write filament type + colour to a slot (SetFilamentInfo). Accepted by
-    #     the firmware (code 0) but has no effect on an empty slot
-    #     (get_filament_info still reads blank). Not wired into any flow.
-    #
-    #     :param slot_index: 0-based slot index.
-    #     :param filament_type: Material type string to write.
-    #     :param color_rgb: [r, g, b] (0-255).
-    #     :return Any: The response result payload.
-    #     """
-    #     return self.send_command(
-    #         "set_filament_info",
-    #         params={"index": slot_index, "type": filament_type,
-    #                 "color": list(color_rgb)})
+    def set_filament_info(self, slot_index: int, filament_type: str,
+                          color_rgb: Any) -> Any:
+        """
+        Write filament type + colour to a slot (SetFilamentInfo). Accepted by
+        the firmware (code 0) but has no effect on an empty slot
+        (get_filament_info still reads blank). Not wired into any flow.
+
+        :param slot_index: 0-based slot index.
+        :param filament_type: Material type string to write.
+        :param color_rgb: [r, g, b] (0-255).
+        :return Any: The response result payload.
+        """
+        return self.send_command(
+            "set_filament_info",
+            params={"index": slot_index, "type": filament_type,
+                    "color": list(color_rgb)})
 
 
 def load_config_prefix(config: ConfigWrapper) -> afcACE:
