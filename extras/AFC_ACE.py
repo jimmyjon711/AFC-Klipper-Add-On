@@ -483,7 +483,7 @@ class afcACE(afcUnit):
         one hands it back. Safe with no live connection.
         """
         self._stop_dry_rotate()
-        ace = getattr(self, "_ace", None)
+        ace = self._ace
         if ace is not None:
             with contextlib.suppress(Exception):
                 ace.disconnect()
@@ -501,14 +501,14 @@ class afcACE(afcUnit):
         """
         # The payload is usually the lane, but the toolchanger can send the
         # extruder object: use its loaded lane, then fall back to AFC's current.
-        name = getattr(lane, 'name', None)
+        name = lane.name
         if self.mode == MODE_DIRECT:
             if name not in self._slot_map:
                 loaded = getattr(lane, 'lane_loaded', None)  # extruder payload
                 if loaded in self._slot_map:
                     name = loaded
                 else:
-                    name = getattr(self.afc, 'current', None)
+                    name = self.afc.current
         else:
             # Combined mode: one shared toolhead, so only act when the event
             # is directly for one of our lanes (a lane load or a manual
@@ -674,7 +674,7 @@ class afcACE(afcUnit):
         :param eventtime: reactor event time (unused)
         """
         if (self._ace is not None
-            and getattr(self._ace, "connected", False)):
+            and self._ace.connected):
             return
         try:
             self._ace = self._make_connection(self.afc.reactor, self.serial_port,
@@ -788,7 +788,7 @@ class afcACE(afcUnit):
             # reconnect, so stop every slot first to avoid the single-assist
             # limit (error_2), then reconcile the active lane.
             if (self._ace is not None
-                and getattr(self._ace, "connected", False)):
+                and self._ace.connected):
                 for s in range(self.SLOTS_PER_UNIT):
                     try:
                         self._ace.stop_feed_assist_sync(s)
@@ -885,7 +885,7 @@ class afcACE(afcUnit):
         response: Dict[str, Any] = super().get_status(eventtime)
         hw = self._cached_hw_status or {}
         temp_info = self._cached_temp_info or {}
-        response["ace_connected"] = bool(self._ace and getattr(self._ace, "connected", False))
+        response["ace_connected"] = bool(self._ace and self._ace.connected)
         response["ace_status"] = hw.get("status", "")
         response["ace_action"] = self._current_action
         # V1 carries temp/humidity in the status payload; the ACE 2 falls back to
@@ -921,7 +921,7 @@ class afcACE(afcUnit):
         slots = []
         inv_list = self._slot_inventory or []
         # Per-lane buffer state from the cached GET_SENSOR_STATE poll (ACE2).
-        slot_sensors = (getattr(self, "_cached_sensor_state", None) or {}).get("slot_sensors") or []
+        slot_sensors = (self._cached_sensor_state or {}).get("slot_sensors") or []
         for i in range(self.SLOTS_PER_UNIT):
             inv = inv_list[i] if i < len(inv_list) else {}
             ss = slot_sensors[i] if i < len(slot_sensors) else None
@@ -970,7 +970,7 @@ class afcACE(afcUnit):
             occupancy is derived from tool_loaded, not the staged flag.
         """
         if self._is_virtual_hub(lane):
-            lane._load_state = bool(getattr(lane, 'tool_loaded', False))
+            lane._load_state = lane.tool_loaded
 
     def _sync_slot_states(self, hw_status: Dict[str, Any]) -> None:
         """
@@ -1006,7 +1006,7 @@ class afcACE(afcUnit):
 
             # Live virtual-hub occupancy from tool_loaded (see _set_hub_state).
             if self._is_virtual_hub(lane):
-                lane._load_state = bool(getattr(lane, 'tool_loaded', False))
+                lane._load_state = lane.tool_loaded
 
             slot_status = slots[slot].get("status", "")
             slot_ready = slot_status == "ready"
@@ -1029,14 +1029,12 @@ class afcACE(afcUnit):
                       and not lane.tool_loaded):
                     # empty -> ready: a fresh insert, which V1 preloads to the hub.
                     # Only on the transition, so an unloaded spool is not re-staged.
-                    load_to_hub = getattr(lane, 'load_to_hub',
-                                          getattr(self.afc, 'load_to_hub', False))
-                    if (load_to_hub
+                    if (lane.load_to_hub
                         and not lane.loaded_to_hub):
                         lane.loaded_to_hub = True
                         self._set_hub_state(lane, True)
 
-            prep_done = getattr(lane, '_afc_prep_done', False)
+            prep_done = lane._afc_prep_done
 
             # Slot ready but lane stuck in NONE, restore loaded state.
             if (slot_ready
@@ -1154,7 +1152,7 @@ class afcACE(afcUnit):
         :return float: Full unload length when tool-loaded, else
             dist_hub + eject_buffer.
         """
-        if getattr(cur_lane, 'tool_loaded', False):
+        if cur_lane.tool_loaded:
             return self._get_unload_length(cur_lane)
         return cur_lane.dist_hub + self.eject_buffer
 
@@ -1194,7 +1192,7 @@ class afcACE(afcUnit):
             and getattr(extruder_obj, 'tc_unit_name', None) is not None):
             on_shuttle = getattr(extruder_obj, 'on_shuttle', None)
             return bool(on_shuttle()) if callable(on_shuttle) else True
-        cur = getattr(self.afc, 'current', None)
+        cur = self.afc.current
         return cur is None or cur == cur_lane.name
 
     def _build_slot_map(self) -> Dict[str, Any]:
@@ -1210,7 +1208,7 @@ class afcACE(afcUnit):
         slot_map = {}
         owner: Dict[int, str] = {}
         for lane_name, lane in self.lanes.items():
-            idx = getattr(lane, 'index', 0)
+            idx = lane.index
             if not (1 <= idx <= self.SLOTS_PER_UNIT):
                 error_str = (
                     f"ACE {self.name}: lane '{lane_name}' has index {idx}, outside this unit's "
@@ -1301,7 +1299,7 @@ class afcACE(afcUnit):
                     lane, slot_info,
                     color_converter=rgb_array_to_hex,
                     afc_defaults={
-                        "default_material_type": getattr(self.afc, "default_material_type", None),
+                        "default_material_type": self.afc.default_material_type,
                         "default_color": getattr(self.afc, "default_color", None),
                     })
             # V1 ACE does not create/match Spoolman: SKUs aren't unique and the
@@ -1555,7 +1553,7 @@ class afcACE(afcUnit):
             self.logger.error(f"ACE calibrate_td1: retract failed: {e}")
 
         # Save td1_bowden_length
-        old_td1 = getattr(cur_lane, "td1_bowden_length", None)
+        old_td1 = cur_lane.td1_bowden_length
         cur_lane.td1_bowden_length = bow_pos
         cal_msg = f"\n td1_bowden_length: New: {bow_pos} Old: {old_td1}"
         self.afc.function.ConfigRewrite(cur_lane.fullname, "td1_bowden_length", bow_pos, cal_msg)
@@ -1659,7 +1657,7 @@ class afcACE(afcUnit):
         if self._unit_load_to_hub is not None:
             load_to_hub = self._unit_load_to_hub
         else:
-            load_to_hub = getattr(lane, 'load_to_hub', getattr(self.afc, 'load_to_hub', False))
+            load_to_hub = lane.load_to_hub
         if (not load_to_hub
             or lane.loaded_to_hub):
             return
@@ -1811,7 +1809,7 @@ class afcACE(afcUnit):
                     dist = self._get_eject_length(cur_lane)
                     self.logger.info(f"ACE unload {cur_lane.name}: unwinding {dist:.0f}mm "
                                      f"(dist_hub={cur_lane.dist_hub:.0f}mm, "
-                                     f"tool_loaded={getattr(cur_lane, 'tool_loaded', False)})")
+                                     f"tool_loaded={cur_lane.tool_loaded})")
                     self._ace.unwind_filament(slot, dist, self.retract_speed)
                     self._wait_for_feed_complete(slot, dist, self.retract_speed)
                     # Pulled back into the unit (past the hub): clear loaded_to_hub
@@ -1920,17 +1918,14 @@ class afcACE(afcUnit):
                         cur_lane, slot_info,
                         color_converter=rgb_array_to_hex,
                         afc_defaults={
-                            "default_material_type": getattr(
-                                self.afc, "default_material_type", None),
+                            "default_material_type": self.afc.default_material_type,
                             "default_color": getattr(self.afc, "default_color", None),
                         })
 
                 # Assume filament staged at hub on startup
                 if (not cur_lane.tool_loaded
                     and not cur_lane.loaded_to_hub):
-                    load_to_hub = getattr(cur_lane, 'load_to_hub',
-                                          getattr(self.afc, 'load_to_hub', False))
-                    if load_to_hub:
+                    if cur_lane.load_to_hub:
                         cur_lane.loaded_to_hub = True
                         self._set_hub_state(cur_lane, True)
 
@@ -2189,11 +2184,11 @@ class afcACE(afcUnit):
         :param msg: message to log
         :param debug: forwarded to log_with_time
         """
-        dt = getattr(self.afc, "afcDeltaTime", None)
+        dt = self.afc.afcDeltaTime
         if dt is None:
             return
         try:
-            if getattr(dt, "start_time", None) is None:
+            if dt.start_time is None:
                 dt.set_start_time()
             dt.log_with_time(msg, debug=debug)
         except Exception:
@@ -2295,7 +2290,7 @@ class afcACE(afcUnit):
         # The unit's encoder saw the filament stop moving; the retries in
         # _ace_load_inner still run, but a failure is then reported as a
         # stall, not a bowden length problem.
-        errored = getattr(self, "_last_move_error", None) == "feed_error"
+        errored = self._last_move_error == "feed_error"
         return errored, success
 
     def _ace_load_inner(self, cur_lane: AFCLane, cur_extruder: Any) -> bool:
@@ -2339,7 +2334,7 @@ class afcACE(afcUnit):
 
         # Enable FPS advance latch so the toolhead sensor stays triggered
         # even when pressure drops briefly after ACE feed completes.
-        buffer_obj = getattr(cur_lane, 'buffer_obj', None)
+        buffer_obj = cur_lane.buffer_obj
         if (buffer_obj is not None
             and hasattr(buffer_obj, 'enable_advance_latch')):
             buffer_obj.enable_advance_latch()
@@ -2360,8 +2355,8 @@ class afcACE(afcUnit):
 
         # ACE serial feed to toolhead area
         stalled = False
-        approach = min(max(getattr(self, "load_approach_length", 0.0), 0.0), feed_dist)
-        approach_speed = getattr(self, "load_approach_speed", self.feed_speed)
+        approach = min(max(self.load_approach_length, 0.0), feed_dist)
+        approach_speed = self.load_approach_speed
         fast = feed_dist - approach
         try:
             success = True
@@ -2414,7 +2409,7 @@ class afcACE(afcUnit):
                     self.logger.info("Feed error but sensor triggered, continuing")
                 else:
                     success = self._smart_load_retry(cur_lane, slot, feed_dist)
-                    stalled = stalled or getattr(self, "_last_move_error", None) == "feed_error"
+                    stalled = stalled or self._last_move_error == "feed_error"
                     if not success:
                         afc.error.handle_lane_failure(cur_lane,
                             f"ACE feed failed for {cur_lane.name}" +
@@ -2441,7 +2436,7 @@ class afcACE(afcUnit):
                     self._wait_for_ace_ready()
                     self._ace.feed_filament(slot, pulse, approach_speed)
                     self._wait_for_feed_complete(slot, pulse, approach_speed, cur_lane)
-                    stalled = stalled or getattr(self, "_last_move_error", None) == "feed_error"
+                    stalled = stalled or self._last_move_error == "feed_error"
                 except Exception:
                     pass
                 self.afc.reactor.pause(self.afc.reactor.monotonic() + 0.3)
@@ -2471,7 +2466,7 @@ class afcACE(afcUnit):
 
         # Advance from the toolhead sensor to the nozzle, mirroring AFC core's
         # tool_stn move that the unit_load_lane branch never reaches.
-        tool_stn = getattr(cur_extruder, 'tool_stn', 0) or 0
+        tool_stn = cur_extruder.tool_stn or 0
         if tool_stn > 0:
             self.logger.info(
                 f"ACE load: advancing tool_stn {tool_stn:.0f}mm to nozzle for {cur_lane.name}")
@@ -2494,11 +2489,10 @@ class afcACE(afcUnit):
         """
         super().lane_unloading(lane)
         try:
-            self.prepare_unload(lane, getattr(lane, 'hub_obj', None),
-                                getattr(lane, 'extruder_obj', None))
+            self.prepare_unload(lane, lane.hub_obj, lane.extruder_obj)
         except Exception as e:
             self.logger.warning(
-                f"ACE: lane_unloading assist-stop error for {getattr(lane, 'name', '?')}: {e}")
+                f"ACE: lane_unloading assist-stop error for {lane.name}: {e}")
 
     def prepare_unload(self, cur_lane: AFCLane, cur_hub: Any, cur_extruder: Any) -> None:
         """
@@ -3331,7 +3325,7 @@ class afcACE(afcUnit):
     @property
     def _dry_rotating(self) -> bool:
         """Whether ACE_DRY ROTATE=1 is active on this unit."""
-        return getattr(self, "_dry_rotate_timer", None) is not None
+        return self._dry_rotate_timer is not None
 
     def _dry_rotate_committed(self) -> List[str]:
         """
@@ -3341,8 +3335,8 @@ class afcACE(afcUnit):
 
         :return List[str]: names of the committed lanes, empty when none.
         """
-        return [lane.name for lane in self.lanes.values() if getattr(lane, "tool_loaded", False) or
-                getattr(lane, "loaded_to_hub", False)]
+        return [lane.name for lane in self.lanes.values()
+                if lane.tool_loaded or lane.loaded_to_hub]
 
     def _dry_rotate_free(self, hw: Dict[str, Any]) -> List[Tuple[int, str]]:
         """
@@ -3389,7 +3383,7 @@ class afcACE(afcUnit):
 
         :param reason: logged when rotation was active, empty for none.
         """
-        timer = getattr(self, "_dry_rotate_timer", None)
+        timer = self._dry_rotate_timer
         if timer is None:
             return
         self._dry_rotate_timer = None
@@ -3732,16 +3726,16 @@ class afcACE(afcUnit):
         # tool_loaded lane on that extruder, since lane_loaded can lag at print start.
         candidate = None
         for lane in self.lanes.values():
-            ext_obj = getattr(lane, 'extruder_obj', None)
+            ext_obj = lane.extruder_obj
             if (ext_obj is None
-                or not getattr(lane, 'tool_loaded', False)):
+                or not lane.tool_loaded):
                 continue
             # The toolhead reports the Klipper extruder name, which can differ
             # from the [AFC_extruder] section name, so match either.
-            ext_names = {getattr(ext_obj, 'name', None), getattr(ext_obj, 'th_extruder_name', None)}
+            ext_names = {ext_obj.name, ext_obj.th_extruder_name}
             if active_ext not in ext_names:
                 continue
-            if getattr(ext_obj, 'lane_loaded', None) == lane.name:
+            if ext_obj.lane_loaded == lane.name:
                 return lane.name
             if candidate is None:
                 candidate = lane.name
@@ -4163,7 +4157,7 @@ class afcACE(afcUnit):
                 # The error can sit on a single frame; the heartbeat's copy
                 # covers one this poll missed, once it is newer than the move.
                 seen_frames = [st]
-                if (getattr(self, "_hw_status_time", None) or 0) > move_start:
+                if (self._hw_status_time or 0) > move_start:
                     seen_frames.append(self._cached_hw_status)
                 for seen in seen_frames:
                     if self._slot_in_error(seen, slot_index):
@@ -4475,8 +4469,7 @@ class afcACE(afcUnit):
                         lane, slot_info,
                         color_converter=rgb_array_to_hex,
                         afc_defaults={
-                            "default_material_type": getattr(
-                                self.afc, "default_material_type", None),
+                            "default_material_type": self.afc.default_material_type,
                             "default_color": getattr(self.afc, "default_color", None),
                         })
 
