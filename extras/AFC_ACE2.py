@@ -685,7 +685,7 @@ def v2_response_to_v1(cmd: int, seq: int, payload: bytes,
             'icon_type': _fval(fields, 10, 0),
             'extruder_temp': extruder_temp,
             'hotbed_temp': bed_temp,
-            # Full raw field map for diagnostics (see ACE_RFID_DUMP).
+            # Full raw field map for diagnostics (see AFC_ACE_RFID_DUMP).
             'raw': dump_fields(fields),
         }
     elif cmd == Cmd.MFRC522_REG_READ:
@@ -1291,7 +1291,7 @@ class afcACE2(afcACE):
                   'motor_error': 'motor error'}.get(state, state)
         msg = (f"ACE2 {self.name} lane {name}: {pretty}. The unit's filament encoder reports "
                "the spool is not moving with the motor, likely a jam or tangle at "
-               "the unit. Clear the snag, then resume. Run ACE_STUCK_SPOOL_DETECTION "
+               "the unit. Clear the snag, then resume. Run AFC_ACE_STUCK_SPOOL_DETECTION "
                "ENABLE=0 to disable this check.")
         try:
             # Route through AFC so it snapshots position and uses the AFC

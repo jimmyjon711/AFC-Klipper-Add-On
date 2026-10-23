@@ -1355,8 +1355,8 @@ class TestAfcACEOnHwStatusCallback:
         unit._on_hw_status_callback({"result": self.V1_IDLE})
 
         assert unit._current_action == ""
-        assert unit.logger.messages == [("info", "ACE Ace_1: idle -> preload(slot 0)"),
-                                        ("info", "ACE Ace_1: preload(slot 0) -> idle")]
+        assert unit.logger.messages == [("debug", "ACE Ace_1: idle -> preload(slot 0)"),
+                                        ("debug", "ACE Ace_1: preload(slot 0) -> idle")]
 
     def test_callback_no_duplicate_log_when_action_unchanged(self):
         unit = self._unit()
@@ -1365,7 +1365,7 @@ class TestAfcACEOnHwStatusCallback:
         unit._on_hw_status_callback({"result": self.ACE2_BUSY})
 
         assert unit._current_action == "feeding(slot 0)"
-        assert unit.logger.messages == [("info", "ACE Ace_1: idle -> feeding(slot 0)")]
+        assert unit.logger.messages == [("debug", "ACE Ace_1: idle -> feeding(slot 0)")]
 
     def test_callback_tracks_action_even_during_operation(self):
         unit = self._unit(operation_active=True)
@@ -1377,7 +1377,7 @@ class TestAfcACEOnHwStatusCallback:
         # Slot sync and the stuck check were skipped.
         assert unit._slot_inventory[0] == {}
         assert unit._stuck_tripped is True
-        assert unit.logger.messages == [("info", "ACE Ace_1: idle -> feeding(slot 0)")]
+        assert unit.logger.messages == [("debug", "ACE Ace_1: idle -> feeding(slot 0)")]
 
     def test_callback_temp_reply_does_not_touch_action(self):
         unit = self._unit()
@@ -1396,7 +1396,7 @@ class TestAfcACEOnHwStatusCallback:
         unit._on_hw_status_callback({"result": status})
 
         assert unit.printer.events == []
-        assert unit.logger.messages == [("info", "ACE Ace_1: idle -> preloading(slot 2)")]
+        assert unit.logger.messages == [("debug", "ACE Ace_1: idle -> preloading(slot 2)")]
 
     def test_status_reply_updates_status_cache_and_syncs(self):
         unit = self._unit()
@@ -3364,7 +3364,7 @@ class TestAfcACEGetLaneResetCommand:
 
         command = unit.get_lane_reset_command(unit.lanes["lane0"], 0.0)
 
-        assert command == "ACE_LANE_RESET UNIT=Ace_1 LANE=lane0"
+        assert command == "AFC_ACE_LANE_RESET UNIT=Ace_1 LANE=lane0"
 
 
 class TestAfcACEWaitFirstConnect:
@@ -3682,13 +3682,13 @@ class TestAfcACEFeedUntilSensor:
             ("info", "ACE calibration: sensor triggered at 50.0mm")]
 
 
-class TestAfcACECmdACEBufferState:
+class TestAfcACECmdAFCACEBufferState:
     def test_not_connected(self):
         unit = ace_p2_unit()
         unit._ace.connected = False
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_BUFFER_STATE(gcmd)
+        unit.cmd_AFC_ACE_BUFFER_STATE(gcmd)
 
         assert gcmd.messages == [("info", "ACE not connected")]
         assert unit._ace.commands == []
@@ -3698,9 +3698,9 @@ class TestAfcACECmdACEBufferState:
         unit._ace.set_reply("get_sensor_state", RuntimeError("nope"))
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_BUFFER_STATE(gcmd)
+        unit.cmd_AFC_ACE_BUFFER_STATE(gcmd)
 
-        assert gcmd.messages == [("info", "ACE_BUFFER_STATE: nope")]
+        assert gcmd.messages == [("info", "AFC_ACE_BUFFER_STATE: nope")]
         assert unit._ace.commands == [("get_sensor_state", {})]
 
     def test_no_slot_sensor_data(self):
@@ -3708,10 +3708,10 @@ class TestAfcACECmdACEBufferState:
         unit._ace.set_reply("get_sensor_state", {"sensor_bitmask": 0})
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_BUFFER_STATE(gcmd)
+        unit.cmd_AFC_ACE_BUFFER_STATE(gcmd)
 
         assert gcmd.messages == [
-            ("info", "ACE_BUFFER_STATE: no per-slot sensor data (firmware without "
+            ("info", "AFC_ACE_BUFFER_STATE: no per-slot sensor data (firmware without "
                      "GET_SENSOR_STATE, or unexpected reply).")]
 
     def test_non_dict_reply_also_reports_no_data(self):
@@ -3719,10 +3719,10 @@ class TestAfcACECmdACEBufferState:
         unit._ace.set_reply("get_sensor_state", None)
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_BUFFER_STATE(gcmd)
+        unit.cmd_AFC_ACE_BUFFER_STATE(gcmd)
 
         assert gcmd.messages == [
-            ("info", "ACE_BUFFER_STATE: no per-slot sensor data (firmware without "
+            ("info", "AFC_ACE_BUFFER_STATE: no per-slot sensor data (firmware without "
                      "GET_SENSOR_STATE, or unexpected reply).")]
 
     def test_reports_each_slot_and_shared_feed_sensor(self):
@@ -3734,7 +3734,7 @@ class TestAfcACECmdACEBufferState:
                             {"slot_sensors": slot_sensors, "buf_feed": True})
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_BUFFER_STATE(gcmd)
+        unit.cmd_AFC_ACE_BUFFER_STATE(gcmd)
 
         assert gcmd.messages == [("info",
             "ACE buffer/sensor state (slot: insert empty | buf_rst buf_back):\n"
@@ -4848,14 +4848,14 @@ class TestAfcACEAceUnloadInner:
         assert unit.logger.messages == []
 
 
-class TestAfcACECmdACECalibrate:
+class TestAfcACECmdAFCACECalibrate:
     def test_usage_on_unknown_lane(self):
         unit = ace_p1_unit("lane0")
         gcmd = make_gcmd(LANE="ghost")
 
-        unit.cmd_ACE_CALIBRATE(gcmd)
+        unit.cmd_AFC_ACE_CALIBRATE(gcmd)
 
-        assert gcmd.responses == ["Usage: ACE_CALIBRATE LANE=<lane_name>"]
+        assert gcmd.responses == ["Usage: AFC_ACE_CALIBRATE LANE=<lane_name>"]
         assert unit._ace.commands == []
         assert unit.logger.messages == []
 
@@ -4863,9 +4863,9 @@ class TestAfcACECmdACECalibrate:
         unit = ace_p1_unit("lane0")
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_CALIBRATE(gcmd)
+        unit.cmd_AFC_ACE_CALIBRATE(gcmd)
 
-        assert gcmd.responses == ["Usage: ACE_CALIBRATE LANE=<lane_name>"]
+        assert gcmd.responses == ["Usage: AFC_ACE_CALIBRATE LANE=<lane_name>"]
         assert unit._ace.commands == []
         assert unit.logger.messages == []
 
@@ -4880,7 +4880,7 @@ class TestAfcACECmdACECalibrate:
         AceP1Wire(unit, on_move=lambda method, params: setattr(sensor, "runout_buttun_state", 1))
         gcmd = make_gcmd(LANE="lane0")
 
-        unit.cmd_ACE_CALIBRATE(gcmd)
+        unit.cmd_AFC_ACE_CALIBRATE(gcmd)
 
         assert gcmd.responses == ["afc_bowden_length calibration: 50.0mm (was 900.0mm)"]
         assert lane.hub_obj.afc_bowden_length == 50.0
@@ -4897,14 +4897,14 @@ class TestAfcACECmdACECalibrate:
             ("info", "ACE calibrate: retracting 55mm")]
 
 
-class TestAfcACECmdACECalibrateHub:
+class TestAfcACECmdAFCACECalibrateHub:
     def test_usage_on_unknown_lane(self):
         unit = ace_p1_unit("lane0")
         gcmd = make_gcmd(LANE="ghost")
 
-        unit.cmd_ACE_CALIBRATE_HUB(gcmd)
+        unit.cmd_AFC_ACE_CALIBRATE_HUB(gcmd)
 
-        assert gcmd.responses == ["Usage: ACE_CALIBRATE_HUB LANE=<lane_name>"]
+        assert gcmd.responses == ["Usage: AFC_ACE_CALIBRATE_HUB LANE=<lane_name>"]
         assert unit._ace.commands == []
         assert unit.logger.messages == []
 
@@ -4912,7 +4912,7 @@ class TestAfcACECmdACECalibrateHub:
         unit = ace_p1_unit("lane0")
         gcmd = make_gcmd(LANE="lane0")
 
-        unit.cmd_ACE_CALIBRATE_HUB(gcmd)
+        unit.cmd_AFC_ACE_CALIBRATE_HUB(gcmd)
 
         assert gcmd.responses == ["Hub calibration requires a physical hub sensor, not virtual"]
         assert unit._ace.commands == []
@@ -4923,7 +4923,7 @@ class TestAfcACECmdACECalibrateHub:
         unit.lanes["lane0"].hub_obj = None
         gcmd = make_gcmd(LANE="lane0")
 
-        unit.cmd_ACE_CALIBRATE_HUB(gcmd)
+        unit.cmd_AFC_ACE_CALIBRATE_HUB(gcmd)
 
         assert gcmd.responses == ["Physical hub sensor required for calibration"]
         assert unit.logger.messages == []
@@ -4937,7 +4937,7 @@ class TestAfcACECmdACECalibrateHub:
         AceP1Wire(unit, on_move=lambda method, params: setattr(hub, "state", True))
         gcmd = make_gcmd(LANE="lane0")
 
-        unit.cmd_ACE_CALIBRATE_HUB(gcmd)
+        unit.cmd_AFC_ACE_CALIBRATE_HUB(gcmd)
 
         assert gcmd.responses == ["dist_hub calibration: 50.0mm (was 60mm)"]
         assert lane.dist_hub == 50.0
@@ -4949,7 +4949,7 @@ class TestAfcACECmdACECalibrateHub:
             ("info", "ACE hub calibrate: trigger at 50.0mm")]
 
 
-class TestAfcACECmdACEStatus:
+class TestAfcACECmdAFCACEStatus:
     def test_cmd_ace_status_reports_busy_action(self):
         unit = ace_p1_unit("lane0")
         unit._ace.set_reply("get_status", {
@@ -4958,7 +4958,7 @@ class TestAfcACECmdACEStatus:
                       {"index": 1, "slot_status": "ready", "status": "ready"}]})
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_STATUS(gcmd)
+        unit.cmd_AFC_ACE_STATUS(gcmd)
 
         assert gcmd.responses == [
             "ACE action: feeding(slot 0)\nACE Status: {'status': 'busy', 'slots': "
@@ -4971,7 +4971,7 @@ class TestAfcACECmdACEStatus:
                                            "slots": [{"index": 0, "status": "ready"}]})
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_STATUS(gcmd)
+        unit.cmd_AFC_ACE_STATUS(gcmd)
 
         assert gcmd.responses == [
             "ACE action: idle\nACE Status: {'status': 'ready', 'slots': "
@@ -4982,7 +4982,7 @@ class TestAfcACECmdACEStatus:
         unit._ace.connected = False
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_STATUS(gcmd)
+        unit.cmd_AFC_ACE_STATUS(gcmd)
 
         assert gcmd.responses == ["ACE not connected"]
         assert unit._ace.commands == []
@@ -4992,18 +4992,18 @@ class TestAfcACECmdACEStatus:
         unit._ace.set_reply("get_status", RuntimeError("timeout"))
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_STATUS(gcmd)
+        unit.cmd_AFC_ACE_STATUS(gcmd)
 
         assert gcmd.responses == ["Error querying ACE: timeout"]
 
 
-class TestAfcACECmdACEFeedInfo:
+class TestAfcACECmdAFCACEFeedInfo:
     def test_not_connected(self):
         unit = ace_p1_unit("lane0")
         unit._ace.connected = False
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_FEED_INFO(gcmd)
+        unit.cmd_AFC_ACE_FEED_INFO(gcmd)
 
         assert gcmd.responses == ["ACE not connected"]
         assert unit._ace.commands == []
@@ -5013,7 +5013,7 @@ class TestAfcACECmdACEFeedInfo:
         unit._ace.set_reply("get_feed_info", RuntimeError("bad"))
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_FEED_INFO(gcmd)
+        unit.cmd_AFC_ACE_FEED_INFO(gcmd)
 
         assert gcmd.responses == ["Error querying ACE feed info: bad"]
 
@@ -5022,7 +5022,7 @@ class TestAfcACECmdACEFeedInfo:
         unit._ace.set_reply("get_feed_info", {"raw_fields": {"a": 1}})
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_FEED_INFO(gcmd)
+        unit.cmd_AFC_ACE_FEED_INFO(gcmd)
 
         assert unit._ace.commands == [("get_feed_info", {})]
         assert gcmd.responses == [
@@ -5035,7 +5035,7 @@ class TestAfcACECmdACEFeedInfo:
             "feed_info": [{"steps": 10, "length": 100, "decoder": 123}]})
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_FEED_INFO(gcmd)
+        unit.cmd_AFC_ACE_FEED_INFO(gcmd)
 
         # 123 / 100.
         assert gcmd.responses == [
@@ -5047,7 +5047,7 @@ class TestAfcACECmdACEFeedInfo:
         unit._ace.set_reply("get_feed_info", {"feed_info": [{}, {"length": 50, "decoder": 60}]})
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_FEED_INFO(gcmd)
+        unit.cmd_AFC_ACE_FEED_INFO(gcmd)
 
         assert gcmd.responses == [
             "ACE feed info (slot: steps / length_mm / encoder_mm / ratio):\n"
@@ -5055,13 +5055,13 @@ class TestAfcACECmdACEFeedInfo:
             "  slot 1: 0 / 50 / 60 / 1.200"]
 
 
-class TestAfcACECmdACERFIDDump:
+class TestAfcACECmdAFCACERFIDDump:
     def test_not_connected(self):
         unit = ace_p1_unit("lane0")
         unit._ace.connected = False
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_RFID_DUMP(gcmd)
+        unit.cmd_AFC_ACE_RFID_DUMP(gcmd)
 
         assert gcmd.responses == ["ACE not connected"]
         assert unit._ace.commands == []
@@ -5071,7 +5071,7 @@ class TestAfcACECmdACERFIDDump:
         unit._ace.set_reply("get_filament_info", {"sku": "S1", "raw": {"1": "x"}})
         gcmd = make_gcmd(LANE="lane2")
 
-        unit.cmd_ACE_RFID_DUMP(gcmd)
+        unit.cmd_AFC_ACE_RFID_DUMP(gcmd)
 
         assert unit._ace.commands == [("get_filament_info", {"index": 2})]
         assert gcmd.responses == [
@@ -5084,7 +5084,7 @@ class TestAfcACECmdACERFIDDump:
         unit._ace.set_reply("get_filament_info", {"sku": ""})
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_RFID_DUMP(gcmd)
+        unit.cmd_AFC_ACE_RFID_DUMP(gcmd)
 
         assert unit._ace.commands == [("get_filament_info", {"index": 0})]
         assert gcmd.responses == [
@@ -5096,7 +5096,7 @@ class TestAfcACECmdACERFIDDump:
         unit = ace_p1_unit("lane0", LaneSpec("lane2", slot=2))
         gcmd = make_gcmd(LANE="ghost")
 
-        unit.cmd_ACE_RFID_DUMP(gcmd)
+        unit.cmd_AFC_ACE_RFID_DUMP(gcmd)
 
         assert unit._ace.commands == [("get_filament_info", {"index": 0})]
         assert gcmd.responses == [
@@ -5109,13 +5109,13 @@ class TestAfcACECmdACERFIDDump:
         unit._ace.set_reply("get_filament_info", RuntimeError("z"))
         gcmd = make_gcmd(SLOT=1)
 
-        unit.cmd_ACE_RFID_DUMP(gcmd)
+        unit.cmd_AFC_ACE_RFID_DUMP(gcmd)
 
         assert unit._ace.commands == [("get_filament_info", {"index": 1})]
         assert gcmd.responses == ["Error reading ACE RFID slot 1: z"]
 
 
-class TestAfcACECmdACERFIDRescan:
+class TestAfcACECmdAFCACERFIDRescan:
     class _Rfid:
         """[AFC_ACE2_rfid] stand-in: the unit it is bound to, and its rescans."""
 
@@ -5157,7 +5157,7 @@ class TestAfcACECmdACERFIDRescan:
         unit, lane = self._unit(self.PETG)
         gcmd = make_gcmd(LANE="lane1")
 
-        unit.cmd_ACE_RFID_RESCAN(gcmd)
+        unit.cmd_AFC_ACE_RFID_RESCAN(gcmd)
 
         assert (lane.material, lane.color) == ("", "")
         assert (lane.extruder_temp, lane.bed_temp) == (None, None)
@@ -5172,7 +5172,7 @@ class TestAfcACECmdACERFIDRescan:
         monkeypatch.setattr(afc_ace_module, "apply_filament_defaults", apply_defaults)
         gcmd = make_gcmd(LANE="lane1")
 
-        unit.cmd_ACE_RFID_RESCAN(gcmd)
+        unit.cmd_AFC_ACE_RFID_RESCAN(gcmd)
 
         assert apply_defaults.calls == [
             ((lane, unit._slot_inventory[0]), {"color_converter": None})]
@@ -5181,7 +5181,7 @@ class TestAfcACECmdACERFIDRescan:
         unit, lane = self._unit({"rfid": 3}, {"rfid": 3}, self.PETG)
         gcmd = make_gcmd(LANE="lane1")
 
-        unit.cmd_ACE_RFID_RESCAN(gcmd)
+        unit.cmd_AFC_ACE_RFID_RESCAN(gcmd)
 
         assert unit._ace.commands == [("get_filament_info", {"index": 0})] * 3
         # Two half-second waits.
@@ -5210,7 +5210,7 @@ class TestAfcACECmdACERFIDRescan:
         unit, lane = self._unit(reply)
         gcmd = make_gcmd(LANE="lane1")
 
-        unit.cmd_ACE_RFID_RESCAN(gcmd)
+        unit.cmd_AFC_ACE_RFID_RESCAN(gcmd)
 
         assert (lane.material, lane.color) == ("PLA", "#FFFFFF")
         assert (lane.extruder_temp, lane.bed_temp) == (210.0, 60.0)
@@ -5224,7 +5224,7 @@ class TestAfcACECmdACERFIDRescan:
         gcmd = make_gcmd(LANE="lane9")
 
         with pytest.raises(gcmd.error) as refused:
-            unit.cmd_ACE_RFID_RESCAN(gcmd)
+            unit.cmd_AFC_ACE_RFID_RESCAN(gcmd)
 
         assert str(refused.value) == "lane9 is not a lane of Ace_1"
         assert unit._ace.commands == []
@@ -5237,7 +5237,7 @@ class TestAfcACECmdACERFIDRescan:
         gcmd = make_gcmd(LANE="lane1")
 
         with pytest.raises(gcmd.error) as refused:
-            unit.cmd_ACE_RFID_RESCAN(gcmd)
+            unit.cmd_AFC_ACE_RFID_RESCAN(gcmd)
 
         assert str(refused.value) == "ACE not connected"
         assert lane.material == "PLA"
@@ -5252,7 +5252,7 @@ class TestAfcACECmdACERFIDRescan:
         gcmd = make_gcmd(LANE="lane1")
 
         with pytest.raises(gcmd.error) as refused:
-            unit.cmd_ACE_RFID_RESCAN(gcmd)
+            unit.cmd_AFC_ACE_RFID_RESCAN(gcmd)
 
         assert str(refused.value) == "lane1 has no ACE slot"
         assert unit._ace.commands == []
@@ -5265,7 +5265,7 @@ class TestAfcACECmdACERFIDRescan:
         unit.printer.objects["AFC_ACE2_rfid"] = rfid
         gcmd = make_gcmd(LANE="lane1")
 
-        unit.cmd_ACE_RFID_RESCAN(gcmd)
+        unit.cmd_AFC_ACE_RFID_RESCAN(gcmd)
 
         assert rfid.rescan_lane.calls == [(("lane1", gcmd), {})]
         # No firmware read on an ACE 2.
@@ -5278,10 +5278,10 @@ class TestAfcACECmdACERFIDRescan:
         gcmd = make_gcmd(LANE="lane1")
 
         with pytest.raises(gcmd.error) as refused:
-            unit.cmd_ACE_RFID_RESCAN(gcmd)
+            unit.cmd_AFC_ACE_RFID_RESCAN(gcmd)
 
         assert str(refused.value) == (
-            "ACE_RFID_RESCAN on Ace2_1 needs [AFC_ACE2_rfid] bound to this unit")
+            "AFC_ACE_RFID_RESCAN on Ace2_1 needs [AFC_ACE2_rfid] bound to this unit")
         assert unit._ace.commands == []
         assert gcmd.responses == []
         assert unit.logger.messages == []
@@ -5293,10 +5293,10 @@ class TestAfcACECmdACERFIDRescan:
         gcmd = make_gcmd(LANE="lane1")
 
         with pytest.raises(gcmd.error) as refused:
-            unit.cmd_ACE_RFID_RESCAN(gcmd)
+            unit.cmd_AFC_ACE_RFID_RESCAN(gcmd)
 
         assert str(refused.value) == (
-            "ACE_RFID_RESCAN on Ace2_1 needs [AFC_ACE2_rfid] bound to this unit")
+            "AFC_ACE_RFID_RESCAN on Ace2_1 needs [AFC_ACE2_rfid] bound to this unit")
         assert rfid.rescan_lane.calls == []
         assert unit._ace.commands == []
         assert gcmd.responses == []
@@ -5345,13 +5345,13 @@ class TestAfcACEParseAceParams:
         assert afcACE._parse_ace_params("[1,2,3]") is None
 
 
-class TestAfcACECmdACECmd:
+class TestAfcACECmdAFCACECmd:
     def test_not_connected(self):
         unit = ace_p1_unit("lane0")
         unit._ace.connected = False
         gcmd = make_gcmd(METHOD="get_status")
 
-        unit.cmd_ACE_CMD(gcmd)
+        unit.cmd_AFC_ACE_CMD(gcmd)
 
         assert gcmd.responses == ["ACE not connected"]
         assert unit._ace.commands == []
@@ -5360,9 +5360,9 @@ class TestAfcACECmdACECmd:
         unit = ace_p1_unit("lane0")
         gcmd = make_gcmd(METHOD="")
 
-        unit.cmd_ACE_CMD(gcmd)
+        unit.cmd_AFC_ACE_CMD(gcmd)
 
-        assert gcmd.responses == ["ACE_CMD: METHOD=<method> required"]
+        assert gcmd.responses == ["AFC_ACE_CMD: METHOD=<method> required"]
         assert unit._ace.commands == []
 
     def test_bad_params_reports_parse_error(self):
@@ -5370,10 +5370,10 @@ class TestAfcACECmdACECmd:
         unit._parse_ace_params = Recorder(raises=ValueError("boom"))
         gcmd = make_gcmd(METHOD="get_status", PARAMS="whatever")
 
-        unit.cmd_ACE_CMD(gcmd)
+        unit.cmd_AFC_ACE_CMD(gcmd)
 
         assert gcmd.responses == [
-            "ACE_CMD: bad PARAMS (boom), e.g. PARAMS={index:0,type:PLA}"]
+            "AFC_ACE_CMD: bad PARAMS (boom), e.g. PARAMS={index:0,type:PLA}"]
         assert unit._ace.commands == []
 
     def test_success_with_params(self):
@@ -5381,29 +5381,29 @@ class TestAfcACECmdACECmd:
         unit._ace.set_reply("set_fan_speed", {"code": 0})
         gcmd = make_gcmd(METHOD="set_fan_speed", PARAMS="{fan_speed:7000}")
 
-        unit.cmd_ACE_CMD(gcmd)
+        unit.cmd_AFC_ACE_CMD(gcmd)
 
         assert unit._ace.commands == [("set_fan_speed", {"fan_speed": 7000})]
-        assert gcmd.responses == ["ACE_CMD set_fan_speed: OK -> {'code': 0}"]
+        assert gcmd.responses == ["AFC_ACE_CMD set_fan_speed: OK -> {'code': 0}"]
 
     def test_command_error(self):
         unit = ace_p1_unit("lane0")
         unit._ace.set_reply("bad", RuntimeError("400"))
         gcmd = make_gcmd(METHOD="bad", PARAMS="")
 
-        unit.cmd_ACE_CMD(gcmd)
+        unit.cmd_AFC_ACE_CMD(gcmd)
 
         assert unit._ace.commands == [("bad", {})]
-        assert gcmd.responses == ["ACE_CMD bad: 400"]
+        assert gcmd.responses == ["AFC_ACE_CMD bad: 400"]
 
 
-class TestAfcACECmdACETempInfo:
+class TestAfcACECmdAFCACETempInfo:
     def test_temp_info_not_connected(self):
         unit = ace_p1_unit("lane0")
         unit._ace.connected = False
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_TEMP_INFO(gcmd)
+        unit.cmd_AFC_ACE_TEMP_INFO(gcmd)
 
         assert gcmd.responses == ["ACE not connected"]
         assert unit._ace.commands == []
@@ -5413,18 +5413,18 @@ class TestAfcACECmdACETempInfo:
         unit._ace.set_reply("get_temp", RuntimeError("unsupported"))
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_TEMP_INFO(gcmd)
+        unit.cmd_AFC_ACE_TEMP_INFO(gcmd)
 
-        assert gcmd.responses == ["ACE_TEMP_INFO: unsupported"]
+        assert gcmd.responses == ["AFC_ACE_TEMP_INFO: unsupported"]
 
     def test_temp_info_non_dict_reply(self):
         unit = ace_p1_unit("lane0")
         unit._ace.set_reply("get_temp", None)
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_TEMP_INFO(gcmd)
+        unit.cmd_AFC_ACE_TEMP_INFO(gcmd)
 
-        assert gcmd.responses == ["ACE_TEMP_INFO: unexpected reply None"]
+        assert gcmd.responses == ["AFC_ACE_TEMP_INFO: unexpected reply None"]
 
     def test_temp_info_success_formats_all_channels(self):
         unit = ace_p1_unit("lane0")
@@ -5433,7 +5433,7 @@ class TestAfcACECmdACETempInfo:
             "env_temp": 24.0, "env_humidity": 41.0})
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_TEMP_INFO(gcmd)
+        unit.cmd_AFC_ACE_TEMP_INFO(gcmd)
 
         assert unit._ace.commands == [("get_temp", {})]
         assert gcmd.responses == [
@@ -5447,7 +5447,7 @@ class TestAfcACECmdACETempInfo:
         unit._ace.set_reply("get_temp", {"box1_temp": 30.5})
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_TEMP_INFO(gcmd)
+        unit.cmd_AFC_ACE_TEMP_INFO(gcmd)
 
         assert gcmd.responses == [
             "ACE temperatures:\n"
@@ -5456,13 +5456,13 @@ class TestAfcACECmdACETempInfo:
             "  env=n/a  humidity=n/a"]
 
 
-class TestAfcACECmdACEMaterialInfo:
+class TestAfcACECmdAFCACEMaterialInfo:
     def test_material_info_not_connected(self):
         unit = ace_p1_unit("lane0")
         unit._ace.connected = False
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_MATERIAL_INFO(gcmd)
+        unit.cmd_AFC_ACE_MATERIAL_INFO(gcmd)
 
         assert gcmd.responses == ["ACE not connected"]
         assert unit._ace.commands == []
@@ -5473,7 +5473,7 @@ class TestAfcACECmdACEMaterialInfo:
             "index": 0, "material_name": "S0395MB251230046650C3", "status": 0})
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_MATERIAL_INFO(gcmd)
+        unit.cmd_AFC_ACE_MATERIAL_INFO(gcmd)
 
         assert unit._ace.commands == [("get_material_info", {"index": 0})]
         assert gcmd.responses == [
@@ -5485,7 +5485,7 @@ class TestAfcACECmdACEMaterialInfo:
             "index": 3, "material_name": "PETG", "status": 1})
         gcmd = make_gcmd(SLOT=3)
 
-        unit.cmd_ACE_MATERIAL_INFO(gcmd)
+        unit.cmd_AFC_ACE_MATERIAL_INFO(gcmd)
 
         assert unit._ace.commands == [("get_material_info", {"index": 3})]
         assert gcmd.responses == ["ACE material info slot 3: name='PETG' status=1"]
@@ -5495,21 +5495,21 @@ class TestAfcACECmdACEMaterialInfo:
         unit._ace.set_reply("get_material_info", RuntimeError("timeout"))
         gcmd = make_gcmd(SLOT=0)
 
-        unit.cmd_ACE_MATERIAL_INFO(gcmd)
+        unit.cmd_AFC_ACE_MATERIAL_INFO(gcmd)
 
-        assert gcmd.responses == ["ACE_MATERIAL_INFO: timeout"]
+        assert gcmd.responses == ["AFC_ACE_MATERIAL_INFO: timeout"]
 
     def test_material_info_non_dict_reply(self):
         unit = ace_p1_unit("lane0")
         unit._ace.set_reply("get_material_info", None)
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_MATERIAL_INFO(gcmd)
+        unit.cmd_AFC_ACE_MATERIAL_INFO(gcmd)
 
-        assert gcmd.responses == ["ACE_MATERIAL_INFO: unexpected reply None"]
+        assert gcmd.responses == ["AFC_ACE_MATERIAL_INFO: unexpected reply None"]
 
 
-class TestAfcACECmdACESetMaterial:
+class TestAfcACECmdAFCACESetMaterial:
     class _LinkWithoutMaterialWrite:
         """A connected link that has no set_material_name (an older connection)."""
         connected = True
@@ -5519,7 +5519,7 @@ class TestAfcACECmdACESetMaterial:
         unit._ace.connected = False
         gcmd = make_gcmd(SLOT=0, NAME="X")
 
-        unit.cmd_ACE_SET_MATERIAL(gcmd)
+        unit.cmd_AFC_ACE_SET_MATERIAL(gcmd)
 
         assert gcmd.messages == [("info", "ACE not connected")]
         assert unit._ace.commands == []
@@ -5529,7 +5529,7 @@ class TestAfcACECmdACESetMaterial:
         unit = ace_p2_unit(connection=None)
         gcmd = make_gcmd(SLOT=0, NAME="X")
 
-        unit.cmd_ACE_SET_MATERIAL(gcmd)
+        unit.cmd_AFC_ACE_SET_MATERIAL(gcmd)
 
         assert gcmd.messages == [("info", "ACE not connected")]
         assert unit.printer.logger.messages == []
@@ -5539,18 +5539,18 @@ class TestAfcACECmdACESetMaterial:
         unit._ace = self._LinkWithoutMaterialWrite()
         gcmd = make_gcmd(SLOT=0, NAME="X")
 
-        unit.cmd_ACE_SET_MATERIAL(gcmd)
+        unit.cmd_AFC_ACE_SET_MATERIAL(gcmd)
 
-        assert gcmd.messages == [("info", "ACE_SET_MATERIAL: requires an ACE 2 Pro unit")]
+        assert gcmd.messages == [("info", "AFC_ACE_SET_MATERIAL: requires an ACE 2 Pro unit")]
         assert unit.printer.logger.messages == []
 
     def test_set_material_requires_slot(self):
         unit = ace_p2_unit()
         gcmd = make_gcmd(NAME="X")
 
-        unit.cmd_ACE_SET_MATERIAL(gcmd)
+        unit.cmd_AFC_ACE_SET_MATERIAL(gcmd)
 
-        assert gcmd.messages == [("info", "ACE_SET_MATERIAL: SLOT=<n> required")]
+        assert gcmd.messages == [("info", "AFC_ACE_SET_MATERIAL: SLOT=<n> required")]
         assert unit._ace.commands == []
         assert unit.printer.logger.messages == []
 
@@ -5558,9 +5558,9 @@ class TestAfcACECmdACESetMaterial:
         unit = ace_p2_unit()
         gcmd = make_gcmd(SLOT=0)
 
-        unit.cmd_ACE_SET_MATERIAL(gcmd)
+        unit.cmd_AFC_ACE_SET_MATERIAL(gcmd)
 
-        assert gcmd.messages == [("info", "ACE_SET_MATERIAL: NAME=<text> required")]
+        assert gcmd.messages == [("info", "AFC_ACE_SET_MATERIAL: NAME=<text> required")]
         assert unit._ace.commands == []
         assert unit.printer.logger.messages == []
 
@@ -5569,11 +5569,11 @@ class TestAfcACECmdACESetMaterial:
         unit._ace.set_reply("get_material_info", {"index": 2, "material_name": "PLA_X"})
         gcmd = make_gcmd(SLOT=2, NAME="PLA_X")
 
-        unit.cmd_ACE_SET_MATERIAL(gcmd)
+        unit.cmd_AFC_ACE_SET_MATERIAL(gcmd)
 
         assert unit._ace.commands == [("set_material_name", {"index": 2, "name": "PLA_X"}),
                                       ("get_material_info", {"index": 2})]
-        assert gcmd.messages == [("info", "ACE_SET_MATERIAL slot 2: stored name='PLA_X'")]
+        assert gcmd.messages == [("info", "AFC_ACE_SET_MATERIAL slot 2: stored name='PLA_X'")]
         assert unit.printer.logger.messages == []
 
     def test_set_material_non_dict_read_back_shown_as_is(self):
@@ -5581,9 +5581,9 @@ class TestAfcACECmdACESetMaterial:
         unit._ace.set_reply("get_material_info", "RAW")
         gcmd = make_gcmd(SLOT=1, NAME="PETG")
 
-        unit.cmd_ACE_SET_MATERIAL(gcmd)
+        unit.cmd_AFC_ACE_SET_MATERIAL(gcmd)
 
-        assert gcmd.messages == [("info", "ACE_SET_MATERIAL slot 1: stored name='RAW'")]
+        assert gcmd.messages == [("info", "AFC_ACE_SET_MATERIAL slot 1: stored name='RAW'")]
         assert unit._ace.commands == [("set_material_name", {"index": 1, "name": "PETG"}),
                                       ("get_material_info", {"index": 1})]
         assert unit.printer.logger.messages == []
@@ -5593,9 +5593,9 @@ class TestAfcACECmdACESetMaterial:
         unit._ace.set_reply("set_material_name", RuntimeError("boom"))
         gcmd = make_gcmd(SLOT=0, NAME="X")
 
-        unit.cmd_ACE_SET_MATERIAL(gcmd)
+        unit.cmd_AFC_ACE_SET_MATERIAL(gcmd)
 
-        assert gcmd.messages == [("info", "ACE_SET_MATERIAL: boom")]
+        assert gcmd.messages == [("info", "AFC_ACE_SET_MATERIAL: boom")]
         # The read-back is never reached.
         assert unit._ace.commands == [("set_material_name", {"index": 0, "name": "X"})]
         assert unit.printer.logger.messages == []
@@ -5605,22 +5605,22 @@ class TestAfcACECmdACESetMaterial:
         unit._ace.set_reply("get_material_info", RuntimeError("readfail"))
         gcmd = make_gcmd(SLOT=0, NAME="X")
 
-        unit.cmd_ACE_SET_MATERIAL(gcmd)
+        unit.cmd_AFC_ACE_SET_MATERIAL(gcmd)
 
         assert gcmd.messages == [
-            ("info", "ACE_SET_MATERIAL slot 0: wrote 'X' (read-back failed: readfail)")]
+            ("info", "AFC_ACE_SET_MATERIAL slot 0: wrote 'X' (read-back failed: readfail)")]
         assert unit._ace.commands == [("set_material_name", {"index": 0, "name": "X"}),
                                       ("get_material_info", {"index": 0})]
         assert unit.printer.logger.messages == []
 
 
-class TestAfcACECmdACESensorState:
+class TestAfcACECmdAFCACESensorState:
     def test_sensor_state_not_connected(self):
         unit = ace_p2_unit()
         unit._ace.connected = False
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_SENSOR_STATE(gcmd)
+        unit.cmd_AFC_ACE_SENSOR_STATE(gcmd)
 
         assert gcmd.messages == [("info", "ACE not connected")]
         assert unit._ace.commands == []
@@ -5630,7 +5630,7 @@ class TestAfcACECmdACESensorState:
         unit = ace_p2_unit(connection=None)
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_SENSOR_STATE(gcmd)
+        unit.cmd_AFC_ACE_SENSOR_STATE(gcmd)
 
         assert gcmd.messages == [("info", "ACE not connected")]
         assert unit.printer.logger.messages == []
@@ -5642,7 +5642,7 @@ class TestAfcACECmdACESensorState:
         unit._ace.set_reply("get_sensor_state", {"sensor_bitmask": 17, "sensors": sensors})
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_SENSOR_STATE(gcmd)
+        unit.cmd_AFC_ACE_SENSOR_STATE(gcmd)
 
         assert unit._ace.commands == [("get_sensor_state", {})]
         assert gcmd.messages == [
@@ -5654,9 +5654,9 @@ class TestAfcACECmdACESensorState:
         unit._ace.set_reply("get_sensor_state", None)
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_SENSOR_STATE(gcmd)
+        unit.cmd_AFC_ACE_SENSOR_STATE(gcmd)
 
-        assert gcmd.messages == [("info", "ACE_SENSOR_STATE: unexpected reply None")]
+        assert gcmd.messages == [("info", "AFC_ACE_SENSOR_STATE: unexpected reply None")]
         assert unit._ace.commands == [("get_sensor_state", {})]
         assert unit.printer.logger.messages == []
 
@@ -5665,9 +5665,9 @@ class TestAfcACECmdACESensorState:
         unit._ace.set_reply("get_sensor_state", RuntimeError("nope"))
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_SENSOR_STATE(gcmd)
+        unit.cmd_AFC_ACE_SENSOR_STATE(gcmd)
 
-        assert gcmd.messages == [("info", "ACE_SENSOR_STATE: nope")]
+        assert gcmd.messages == [("info", "AFC_ACE_SENSOR_STATE: nope")]
         assert unit._ace.commands == [("get_sensor_state", {})]
         assert unit.printer.logger.messages == []
 
@@ -5743,7 +5743,7 @@ class TestAfcACEPollUntilStatus:
         assert unit.printer.logger.messages == []
 
 
-class TestAfcACECmdACEFeedTest:
+class TestAfcACECmdAFCACEFeedTest:
     @staticmethod
     def _pass(busy_polls: int) -> List[Dict[str, str]]:
         """
@@ -5761,7 +5761,7 @@ class TestAfcACECmdACEFeedTest:
         unit._ace.connected = False
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_FEED_TEST(gcmd)
+        unit.cmd_AFC_ACE_FEED_TEST(gcmd)
 
         assert gcmd.messages == [("info", "ACE not connected")]
         assert unit._ace.commands == []
@@ -5771,7 +5771,7 @@ class TestAfcACECmdACEFeedTest:
         unit = ace_p2_unit(connection=None)
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_FEED_TEST(gcmd)
+        unit.cmd_AFC_ACE_FEED_TEST(gcmd)
 
         assert gcmd.messages == [("info", "ACE not connected")]
         assert unit.printer.logger.messages == []
@@ -5780,10 +5780,10 @@ class TestAfcACECmdACEFeedTest:
         unit = ace_p2_unit()
         gcmd = make_gcmd(SLOT=-1, LENGTH=100.0, START=10, END=250, STEP=20)
 
-        unit.cmd_ACE_FEED_TEST(gcmd)
+        unit.cmd_AFC_ACE_FEED_TEST(gcmd)
 
         assert gcmd.messages == [
-            ("info", "ACE_FEED_TEST: no loaded slot detected, pass SLOT=<n>")]
+            ("info", "AFC_ACE_FEED_TEST: no loaded slot detected, pass SLOT=<n>")]
         assert unit._ace.commands == []
         assert unit.printer.logger.messages == []
 
@@ -5791,10 +5791,10 @@ class TestAfcACECmdACEFeedTest:
         unit = ace_p2_unit()
         gcmd = make_gcmd(SLOT=4)
 
-        unit.cmd_ACE_FEED_TEST(gcmd)
+        unit.cmd_AFC_ACE_FEED_TEST(gcmd)
 
         assert gcmd.messages == [
-            ("info", "ACE_FEED_TEST: no loaded slot detected, pass SLOT=<n>")]
+            ("info", "AFC_ACE_FEED_TEST: no loaded slot detected, pass SLOT=<n>")]
         assert unit._ace.commands == []
         assert unit.printer.logger.messages == []
 
@@ -5804,7 +5804,7 @@ class TestAfcACECmdACEFeedTest:
         unit._ace.set_reply("get_status", *self._pass(5), *self._pass(2))
         gcmd = make_gcmd(SLOT=0, LENGTH=100.0, START=10, END=30, STEP=20)
 
-        unit.cmd_ACE_FEED_TEST(gcmd)
+        unit.cmd_AFC_ACE_FEED_TEST(gcmd)
 
         moves = [c for c in unit._ace.commands if c[0] != "get_status"]
         assert moves == [
@@ -5814,11 +5814,11 @@ class TestAfcACECmdACEFeedTest:
             ("unwind_filament", {"index": 0, "length": 100.0, "speed": 30, "mode": "normal"}),
         ]
         assert gcmd.messages == [
-            ("info", "ACE_FEED_TEST: slot 0, 100mm, speeds 10..30 step 20 "
+            ("info", "AFC_ACE_FEED_TEST: slot 0, 100mm, speeds 10..30 step 20 "
                      "(feed + net-zero unwind each pass)"),
             ("info", "  speed= 10:  1.00s  (~ 100 mm/s)"),
             ("info", "  speed= 30:  0.40s  (~ 250 mm/s)"),
-            ("info", "ACE_FEED_TEST done. times scale with speed -> speed param WORKS\n"
+            ("info", "AFC_ACE_FEED_TEST done. times scale with speed -> speed param WORKS\n"
                      "  peak measured rate ~250 mm/s\n"
                      "  max effective commanded speed ~30 (higher stops improving the rate)"),
         ]
@@ -5829,14 +5829,14 @@ class TestAfcACECmdACEFeedTest:
         unit._ace.set_reply("get_status", *self._pass(4), *self._pass(4))
         gcmd = make_gcmd(LENGTH=40.0, START=20, END=40, STEP=20)
 
-        unit.cmd_ACE_FEED_TEST(gcmd)
+        unit.cmd_AFC_ACE_FEED_TEST(gcmd)
 
         assert gcmd.messages == [
-            ("info", "ACE_FEED_TEST: slot 1, 40mm, speeds 20..40 step 20 "
+            ("info", "AFC_ACE_FEED_TEST: slot 1, 40mm, speeds 20..40 step 20 "
                      "(feed + net-zero unwind each pass)"),
             ("info", "  speed= 20:  0.80s  (~  50 mm/s)"),
             ("info", "  speed= 40:  0.80s  (~  50 mm/s)"),
-            ("info", "ACE_FEED_TEST done. times ~constant -> speed param appears "
+            ("info", "AFC_ACE_FEED_TEST done. times ~constant -> speed param appears "
                      "CLAMPED/IGNORED (like the fan)\n"
                      "  peak measured rate ~50 mm/s\n"
                      "  max effective commanded speed ~20 (higher stops improving the rate)"),
@@ -5851,14 +5851,14 @@ class TestAfcACECmdACEFeedTest:
         unit._ace.set_reply("get_status", *self._pass(0), *self._pass(0))
         gcmd = make_gcmd(SLOT=0, LENGTH=100.0, START=10, END=30, STEP=20)
 
-        unit.cmd_ACE_FEED_TEST(gcmd)
+        unit.cmd_AFC_ACE_FEED_TEST(gcmd)
 
         assert gcmd.messages == [
-            ("info", "ACE_FEED_TEST: slot 0, 100mm, speeds 10..30 step 20 "
+            ("info", "AFC_ACE_FEED_TEST: slot 0, 100mm, speeds 10..30 step 20 "
                      "(feed + net-zero unwind each pass)"),
             ("info", "  speed= 10:  0.00s  (~   0 mm/s)"),
             ("info", "  speed= 30:  0.00s  (~   0 mm/s)"),
-            ("info", "ACE_FEED_TEST done. times scale with speed -> speed param WORKS\n"
+            ("info", "AFC_ACE_FEED_TEST done. times scale with speed -> speed param WORKS\n"
                      "  peak measured rate ~1 mm/s\n"
                      "  max effective commanded speed ~30 (higher stops improving the rate)"),
         ]
@@ -5870,13 +5870,13 @@ class TestAfcACECmdACEFeedTest:
         unit._ace.set_reply("get_status", *self._pass(1))
         gcmd = make_gcmd(SLOT=3, LENGTH=50.0, START=25, END=25, STEP=10)
 
-        unit.cmd_ACE_FEED_TEST(gcmd)
+        unit.cmd_AFC_ACE_FEED_TEST(gcmd)
 
         assert gcmd.messages == [
-            ("info", "ACE_FEED_TEST: slot 3, 50mm, speeds 25..25 step 10 "
+            ("info", "AFC_ACE_FEED_TEST: slot 3, 50mm, speeds 25..25 step 10 "
                      "(feed + net-zero unwind each pass)"),
             ("info", "  speed= 25:  0.20s  (~ 250 mm/s)"),
-            ("info", "ACE_FEED_TEST done."),
+            ("info", "AFC_ACE_FEED_TEST done."),
         ]
         moves = [c for c in unit._ace.commands if c[0] != "get_status"]
         assert moves == [
@@ -5891,12 +5891,12 @@ class TestAfcACECmdACEFeedTest:
         unit._ace.set_reply("feed_filament", RuntimeError("FORBIDDEN"))
         gcmd = make_gcmd(SLOT=0, START=10, END=30, STEP=20)
 
-        unit.cmd_ACE_FEED_TEST(gcmd)
+        unit.cmd_AFC_ACE_FEED_TEST(gcmd)
 
         assert gcmd.messages == [
-            ("info", "ACE_FEED_TEST: slot 0, 100mm, speeds 10..30 step 20 "
+            ("info", "AFC_ACE_FEED_TEST: slot 0, 100mm, speeds 10..30 step 20 "
                      "(feed + net-zero unwind each pass)"),
-            ("info", "ACE_FEED_TEST aborted at speed 10: FORBIDDEN"),
+            ("info", "AFC_ACE_FEED_TEST aborted at speed 10: FORBIDDEN"),
         ]
         # A ready check before the feed, and one after the abort.
         assert unit._ace.commands == [("get_status", {}),
@@ -5906,12 +5906,12 @@ class TestAfcACECmdACEFeedTest:
         assert unit.printer.logger.messages == []
 
 
-class TestAfcACECmdACEDry:
+class TestAfcACECmdAFCACEDry:
     def test_temp_capped_to_max(self):
         unit = ace_p2_unit(values={"max_dryer_temperature": 55.0})
         gcmd = make_gcmd(TEMP=80.0, DURATION=90.0, FAN=7000)
 
-        unit.cmd_ACE_DRY(gcmd)
+        unit.cmd_AFC_ACE_DRY(gcmd)
 
         assert unit._ace.commands == [
             ("drying", {"temp": 55.0, "fan_speed": 7000, "duration": 90.0})]
@@ -5925,7 +5925,7 @@ class TestAfcACECmdACEDry:
         unit._ace.connected = False
         gcmd = make_gcmd(TEMP=40.0)
 
-        unit.cmd_ACE_DRY(gcmd)
+        unit.cmd_AFC_ACE_DRY(gcmd)
 
         assert gcmd.messages == [("info", "ACE not connected")]
         assert unit._ace.commands == []
@@ -5935,7 +5935,7 @@ class TestAfcACECmdACEDry:
         unit = ace_p2_unit(connection=None)
         gcmd = make_gcmd(TEMP=40.0)
 
-        unit.cmd_ACE_DRY(gcmd)
+        unit.cmd_AFC_ACE_DRY(gcmd)
 
         assert gcmd.messages == [("info", "ACE not connected")]
         assert unit.printer.logger.messages == []
@@ -5944,7 +5944,7 @@ class TestAfcACECmdACEDry:
         unit = ace_p2_unit()
         gcmd = make_gcmd(TEMP=40.0, DURATION=30.0, FAN=7000)
 
-        unit.cmd_ACE_DRY(gcmd)
+        unit.cmd_AFC_ACE_DRY(gcmd)
 
         assert unit._ace.commands == [
             ("drying", {"temp": 40.0, "fan_speed": 7000, "duration": 30.0})]
@@ -5955,7 +5955,7 @@ class TestAfcACECmdACEDry:
         unit = ace_p2_unit()
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_DRY(gcmd)
+        unit.cmd_AFC_ACE_DRY(gcmd)
 
         assert unit._ace.commands == [
             ("drying", {"temp": 50.0, "fan_speed": 7000, "duration": 90.0})]
@@ -5967,7 +5967,7 @@ class TestAfcACECmdACEDry:
         unit._ace.set_reply("drying", RuntimeError("nope"))
         gcmd = make_gcmd(TEMP=40.0)
 
-        unit.cmd_ACE_DRY(gcmd)
+        unit.cmd_AFC_ACE_DRY(gcmd)
 
         assert gcmd.messages == [("info", "Error starting dryer: nope")]
         assert unit._ace.commands == [
@@ -5975,13 +5975,13 @@ class TestAfcACECmdACEDry:
         assert unit.printer.logger.messages == []
 
 
-class TestAfcACECmdACEDryStop:
+class TestAfcACECmdAFCACEDryStop:
     def test_not_connected(self):
         unit = ace_p2_unit()
         unit._ace.connected = False
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_DRY_STOP(gcmd)
+        unit.cmd_AFC_ACE_DRY_STOP(gcmd)
 
         assert gcmd.messages == [("info", "ACE not connected")]
         assert unit._ace.commands == []
@@ -5991,7 +5991,7 @@ class TestAfcACECmdACEDryStop:
         unit = ace_p2_unit(connection=None)
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_DRY_STOP(gcmd)
+        unit.cmd_AFC_ACE_DRY_STOP(gcmd)
 
         assert gcmd.messages == [("info", "ACE not connected")]
         assert unit.printer.logger.messages == []
@@ -6000,7 +6000,7 @@ class TestAfcACECmdACEDryStop:
         unit = ace_p2_unit()
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_DRY_STOP(gcmd)
+        unit.cmd_AFC_ACE_DRY_STOP(gcmd)
 
         assert unit._ace.commands == [("drying_stop", {})]
         assert gcmd.messages == [("info", "ACE dryer stopped")]
@@ -6011,7 +6011,7 @@ class TestAfcACECmdACEDryStop:
         unit._ace.set_reply("drying_stop", RuntimeError("x"))
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_DRY_STOP(gcmd)
+        unit.cmd_AFC_ACE_DRY_STOP(gcmd)
 
         assert gcmd.messages == [("info", "Error stopping dryer: x")]
         assert unit._ace.commands == [("drying_stop", {})]
@@ -6089,7 +6089,7 @@ class TestAfcACEDryRotate:
         :return tuple: a unit drying with ROTATE=1, and its wire
         """
         unit, wire = self._unit(*lanes, **kwargs)
-        unit.cmd_ACE_DRY(make_gcmd(TEMP=50.0, DURATION=240.0, ROTATE=1))
+        unit.cmd_AFC_ACE_DRY(make_gcmd(TEMP=50.0, DURATION=240.0, ROTATE=1))
         wire.link.commands.clear()
         return unit, wire
 
@@ -6107,18 +6107,18 @@ class TestAfcACEDryRotate:
 
     def test_rotate_off_arms_nothing(self):
         unit, _ = self._unit()
-        unit.cmd_ACE_DRY(make_gcmd(TEMP=50.0))
+        unit.cmd_AFC_ACE_DRY(make_gcmd(TEMP=50.0))
         assert not unit._dry_rotating
         assert unit.get_status()["ace_dry_rotate"] is False
 
     def test_rotate_arms_and_names_the_threaded_lane(self):
         unit, _ = self._unit()
         gcmd = make_gcmd(TEMP=50.0, DURATION=240.0, ROTATE=1)
-        unit.cmd_ACE_DRY(gcmd)
+        unit.cmd_AFC_ACE_DRY(gcmd)
         assert unit._dry_rotating
         assert unit.get_status()["ace_dry_rotate"] is True
         assert gcmd.messages[-1] == (
-            "info", "ACE_DRY: rotating free spools on Ace_1 every 300s "
+            "info", "AFC_ACE_DRY: rotating free spools on Ace_1 every 300s "
                     "(lane1, lane2, lane4). Not turning lane3: filament is in "
                     "the feed gears, unthread it to dry with rotation")
 
@@ -6126,16 +6126,16 @@ class TestAfcACEDryRotate:
         unit, wire = self._unit("lane1", LaneSpec("lane2", prep=True, load=True),
                                 slots=("empty", "ready", "empty", "empty"))
         gcmd = make_gcmd(TEMP=50.0, ROTATE=1)
-        unit.cmd_ACE_DRY(gcmd)
+        unit.cmd_AFC_ACE_DRY(gcmd)
         assert not unit._dry_rotating
         assert gcmd.messages[-1][1].startswith(
-            "ACE_DRY: ROTATE disabled for Ace_1 -- lane2 still has filament loaded")
+            "AFC_ACE_DRY: ROTATE disabled for Ace_1 -- lane2 still has filament loaded")
         assert [m for m, _ in wire.link.commands] == ["drying"]
 
     def test_a_failed_dryer_start_does_not_rotate(self):
         unit, wire = self._unit()
         wire.link.set_reply("drying", RuntimeError("nope"))
-        unit.cmd_ACE_DRY(make_gcmd(TEMP=50.0, ROTATE=1))
+        unit.cmd_AFC_ACE_DRY(make_gcmd(TEMP=50.0, ROTATE=1))
         assert not unit._dry_rotating
 
     def test_turns_only_empty_slots_slowly(self):
@@ -6220,7 +6220,7 @@ class TestAfcACEDryRotate:
     def test_re_arming_mid_pass_ends_the_old_pass(self):
         unit, wire = self._armed()
         def unwind(params):
-            unit.cmd_ACE_DRY(make_gcmd(TEMP=50.0, ROTATE=1))
+            unit.cmd_AFC_ACE_DRY(make_gcmd(TEMP=50.0, ROTATE=1))
             return {}
         wire.link.set_reply("unwind_filament", unwind)
         assert self._tick(unit) == unit.afc.reactor.NEVER
@@ -6229,7 +6229,7 @@ class TestAfcACEDryRotate:
 
     def test_dry_stop_disarms(self):
         unit, _ = self._armed()
-        unit.cmd_ACE_DRY_STOP(make_gcmd())
+        unit.cmd_AFC_ACE_DRY_STOP(make_gcmd())
         assert not unit._dry_rotating
 
     def test_stop_mid_turn_stops_the_motor(self):
@@ -6254,11 +6254,11 @@ class TestAfcACEDryRotate:
                              slots=("ready", "ready", "ready", "ready"))
         gcmd = make_gcmd(TEMP=50.0, DURATION=240.0, ROTATE=1)
 
-        unit.cmd_ACE_DRY(gcmd)
+        unit.cmd_AFC_ACE_DRY(gcmd)
 
         assert unit._dry_rotating
         assert gcmd.messages[-1] == (
-            "info", "ACE_DRY: rotating free spools on Ace_1 every 300s. Not turning "
+            "info", "AFC_ACE_DRY: rotating free spools on Ace_1 every 300s. Not turning "
                     "lane1, lane2, lane3, lane4: filament is in the feed gears, "
                     "unthread it to dry with rotation")
 
@@ -6267,11 +6267,11 @@ class TestAfcACEDryRotate:
                              slots=("empty", "empty", "empty", "empty"))
         gcmd = make_gcmd(TEMP=50.0, DURATION=240.0, ROTATE=1)
 
-        unit.cmd_ACE_DRY(gcmd)
+        unit.cmd_AFC_ACE_DRY(gcmd)
 
         assert unit._dry_rotating
         assert gcmd.messages[-1] == (
-            "info", "ACE_DRY: rotating free spools on Ace_1 every 300s "
+            "info", "AFC_ACE_DRY: rotating free spools on Ace_1 every 300s "
                     "(lane1, lane2, lane3, lane4)")
 
 
@@ -6279,7 +6279,7 @@ class TestAfcACEDryRotateSpin:
     def test_no_connection_returns_before_any_unwind(self):
         unit = ace_p2_unit("lane1", "lane2", "lane4")
         wire = AceDryRotateWire(unit, "empty", "empty", "empty")
-        unit.cmd_ACE_DRY(make_gcmd(TEMP=50.0, DURATION=240.0, ROTATE=1))
+        unit.cmd_AFC_ACE_DRY(make_gcmd(TEMP=50.0, DURATION=240.0, ROTATE=1))
         wire.link.commands.clear()
         unit._ace = None
 
@@ -6309,13 +6309,13 @@ class TestAfcACEDryRotateHoldReason:
         assert unit._dry_rotate_hold_reason() == "another ACE operation is running"
 
 
-class TestAfcACECmdACEFan:
+class TestAfcACECmdAFCACEFan:
     def test_not_connected(self):
         unit = ace_p2_unit()
         unit._ace.connected = False
         gcmd = make_gcmd(SPEED=50)
 
-        unit.cmd_ACE_FAN(gcmd)
+        unit.cmd_AFC_ACE_FAN(gcmd)
 
         assert gcmd.messages == [("info", "ACE not connected")]
         assert unit._ace.commands == []
@@ -6325,7 +6325,7 @@ class TestAfcACECmdACEFan:
         unit = ace_p2_unit(connection=None)
         gcmd = make_gcmd(SPEED=50)
 
-        unit.cmd_ACE_FAN(gcmd)
+        unit.cmd_AFC_ACE_FAN(gcmd)
 
         assert gcmd.messages == [("info", "ACE not connected")]
         assert unit.printer.logger.messages == []
@@ -6334,7 +6334,7 @@ class TestAfcACECmdACEFan:
         unit = ace_p2_unit()
         gcmd = make_gcmd(SPEED=40)
 
-        unit.cmd_ACE_FAN(gcmd)
+        unit.cmd_AFC_ACE_FAN(gcmd)
 
         assert unit._ace.commands == [("set_fan_speed", {"speed": 40, "fan_speed": 40})]
         assert gcmd.messages == [("info", "ACE fan set to 40%")]
@@ -6345,21 +6345,21 @@ class TestAfcACECmdACEFan:
         unit._ace.set_reply("set_fan_speed", RuntimeError("f"))
         gcmd = make_gcmd(SPEED=40)
 
-        unit.cmd_ACE_FAN(gcmd)
+        unit.cmd_AFC_ACE_FAN(gcmd)
 
         assert gcmd.messages == [("info", "Error setting fan: f")]
         assert unit._ace.commands == [("set_fan_speed", {"speed": 40, "fan_speed": 40})]
         assert unit.printer.logger.messages == []
 
 
-class TestAfcACECmdACELaneReset:
+class TestAfcACECmdAFCACELaneReset:
     def test_usage_on_unknown_lane(self):
         unit = ace_p2_unit("lane1", operation_active=True)
         gcmd = make_gcmd(LANE="ghost")
 
-        unit.cmd_ACE_LANE_RESET(gcmd)
+        unit.cmd_AFC_ACE_LANE_RESET(gcmd)
 
-        assert gcmd.messages == [("info", "Usage: ACE_LANE_RESET LANE=<lane_name>")]
+        assert gcmd.messages == [("info", "Usage: AFC_ACE_LANE_RESET LANE=<lane_name>")]
         # eject_lane never ran, so its operation flag is untouched.
         assert unit._operation_active is True
         assert unit._ace.commands == []
@@ -6369,9 +6369,9 @@ class TestAfcACECmdACELaneReset:
         unit = ace_p2_unit("lane1", operation_active=True)
         gcmd = make_gcmd()
 
-        unit.cmd_ACE_LANE_RESET(gcmd)
+        unit.cmd_AFC_ACE_LANE_RESET(gcmd)
 
-        assert gcmd.messages == [("info", "Usage: ACE_LANE_RESET LANE=<lane_name>")]
+        assert gcmd.messages == [("info", "Usage: AFC_ACE_LANE_RESET LANE=<lane_name>")]
         assert unit._operation_active is True
         assert unit._ace.commands == []
         assert unit.printer.logger.messages == []
@@ -6385,7 +6385,7 @@ class TestAfcACECmdACELaneReset:
         unit._ace.set_reply("get_status", ready, busy, ready, ready)
         gcmd = make_gcmd(LANE="lane1")
 
-        unit.cmd_ACE_LANE_RESET(gcmd)
+        unit.cmd_AFC_ACE_LANE_RESET(gcmd)
 
         # dist_hub plus the default 475mm eject_buffer.
         assert [c for c in unit._ace.commands if c[0] != "get_status"] == [
@@ -6399,7 +6399,7 @@ class TestAfcACECmdACELaneReset:
             ("info", "ACE eject lane1: unwinding 575mm (dist_hub=100mm)")]
 
 
-class TestAfcACECmdACEFeedAssist:
+class TestAfcACECmdAFCACEFeedAssist:
     _STOPPED = ("Feed assist stopped on slot 2, watchdog suppressed until assist is "
                 "started again")
 
@@ -6416,7 +6416,7 @@ class TestAfcACECmdACEFeedAssist:
         gcmd = make_gcmd(LANE="lane1")
 
         with pytest.raises(AceGcmd.error, match=r"^ENABLE is required \(0 or 1\)$"):
-            unit.cmd_ACE_FEED_ASSIST(gcmd)
+            unit.cmd_AFC_ACE_FEED_ASSIST(gcmd)
 
         assert unit._assist_suppressed == set()
         assert unit._ace.commands == []
@@ -6428,7 +6428,7 @@ class TestAfcACECmdACEFeedAssist:
         gcmd = make_gcmd(ENABLE=0)
 
         with pytest.raises(AceGcmd.error, match=r"^LANE or SLOT is required$"):
-            unit.cmd_ACE_FEED_ASSIST(gcmd)
+            unit.cmd_AFC_ACE_FEED_ASSIST(gcmd)
 
         assert unit._assist_suppressed == set()
         assert unit._ace.commands == []
@@ -6440,7 +6440,7 @@ class TestAfcACECmdACEFeedAssist:
         gcmd = make_gcmd(ENABLE=0, LANE="nope")
 
         with pytest.raises(AceGcmd.error, match=r"^Unknown lane for this unit: nope$"):
-            unit.cmd_ACE_FEED_ASSIST(gcmd)
+            unit.cmd_AFC_ACE_FEED_ASSIST(gcmd)
 
         assert unit._assist_suppressed == set()
         assert unit._ace.commands == []
@@ -6451,7 +6451,7 @@ class TestAfcACECmdACEFeedAssist:
         unit = self._unit(feed_assist_active=[2])
         gcmd = make_gcmd(ENABLE=0, LANE="lane3")
 
-        unit.cmd_ACE_FEED_ASSIST(gcmd)
+        unit.cmd_AFC_ACE_FEED_ASSIST(gcmd)
 
         assert unit._assist_suppressed == {2}
         assert unit._feed_assist_active == set()
@@ -6466,7 +6466,7 @@ class TestAfcACECmdACEFeedAssist:
         unit = self._unit()
         gcmd = make_gcmd(ENABLE=0, LANE="lane3")
 
-        unit.cmd_ACE_FEED_ASSIST(gcmd)
+        unit.cmd_AFC_ACE_FEED_ASSIST(gcmd)
 
         assert unit._assist_suppressed == {2}
         assert unit._ace.commands == [("stop_feed_assist", {"index": 2})]
@@ -6479,7 +6479,7 @@ class TestAfcACECmdACEFeedAssist:
         unit._ace.stop_feed_assist = Recorder(raises=RuntimeError("boom"))
         gcmd = make_gcmd(ENABLE=0, LANE="lane3")
 
-        unit.cmd_ACE_FEED_ASSIST(gcmd)
+        unit.cmd_AFC_ACE_FEED_ASSIST(gcmd)
 
         assert unit._assist_suppressed == {2}
         assert unit._ace.stop_feed_assist.calls == [((2,), {})]
@@ -6490,7 +6490,7 @@ class TestAfcACECmdACEFeedAssist:
         unit = self._unit(connection=None)
         gcmd = make_gcmd(ENABLE=0, LANE="lane3")
 
-        unit.cmd_ACE_FEED_ASSIST(gcmd)
+        unit.cmd_AFC_ACE_FEED_ASSIST(gcmd)
 
         assert unit._assist_suppressed == {2}
         assert unit._feed_assist_active == set()
@@ -6502,7 +6502,7 @@ class TestAfcACECmdACEFeedAssist:
         unit._ace.connected = False
         gcmd = make_gcmd(ENABLE=0, SLOT=2)
 
-        unit.cmd_ACE_FEED_ASSIST(gcmd)
+        unit.cmd_AFC_ACE_FEED_ASSIST(gcmd)
 
         assert unit._assist_suppressed == {2}
         assert unit._ace.commands == []
@@ -6514,7 +6514,7 @@ class TestAfcACECmdACEFeedAssist:
         unit = self._unit(feed_assist_active=[1])
         gcmd = make_gcmd(ENABLE=1, LANE="lane1")
 
-        unit.cmd_ACE_FEED_ASSIST(gcmd)
+        unit.cmd_AFC_ACE_FEED_ASSIST(gcmd)
 
         assert unit._ace.commands == [("get_status", {}), ("stop_feed_assist", {"index": 1}),
                                       ("get_status", {}), ("start_feed_assist", {"index": 0})]
@@ -6528,7 +6528,7 @@ class TestAfcACECmdACEFeedAssist:
         unit._assist_suppressed.add(3)
         gcmd = make_gcmd(ENABLE=1, SLOT=3)
 
-        unit.cmd_ACE_FEED_ASSIST(gcmd)
+        unit.cmd_AFC_ACE_FEED_ASSIST(gcmd)
 
         assert unit._assist_suppressed == set()
         assert unit._feed_assist_active == {3}
@@ -6542,7 +6542,7 @@ class TestAfcACECmdACEFeedAssist:
         unit = self._unit(feed_assist_active=[1])
         gcmd = make_gcmd(ENABLE=1, LANE="lane2")
 
-        unit.cmd_ACE_FEED_ASSIST(gcmd)
+        unit.cmd_AFC_ACE_FEED_ASSIST(gcmd)
 
         assert unit._feed_assist_active == {1}
         assert unit._ace.commands == []
@@ -7104,7 +7104,7 @@ class TestAfcACECheckStuck:
         assert unit.printer.afc.error.AFC_error.calls == [(
             ("ACE stuck spool detected on Ace_1: feed assist ran continuously for 5.0s "
              "(>= 4.0s threshold). The spool is likely tangled or jammed at the unit. "
-             "Clear the snag, then resume. Run ACE_STUCK_SPOOL_DETECTION ENABLE=0 to "
+             "Clear the snag, then resume. Run AFC_ACE_STUCK_SPOOL_DETECTION ENABLE=0 to "
              "disable this check.",), {"pause": True})]
         assert unit.printer.logger.messages == []
 
@@ -7132,7 +7132,7 @@ class TestAfcACEHandleStuck:
         assert unit.printer.afc.error.AFC_error.calls == [(
             ("ACE stuck spool detected on Ace_1 lane lane1: feed assist ran continuously "
              "for 7.5s (>= 4.0s threshold). The spool is likely tangled or jammed at the "
-             "unit. Clear the snag, then resume. Run ACE_STUCK_SPOOL_DETECTION ENABLE=0 "
+             "unit. Clear the snag, then resume. Run AFC_ACE_STUCK_SPOOL_DETECTION ENABLE=0 "
              "to disable this check.",), {"pause": True})]
         assert unit.printer.gcode.run_script_from_command.calls == []
         assert unit.printer.logger.messages == []
@@ -7145,7 +7145,7 @@ class TestAfcACEHandleStuck:
 
         message = ("ACE stuck spool detected on Ace_1: feed assist ran continuously for "
                    "9.0s (>= 6.0s threshold). The spool is likely tangled or jammed at "
-                   "the unit. Clear the snag, then resume. Run ACE_STUCK_SPOOL_DETECTION "
+                   "the unit. Clear the snag, then resume. Run AFC_ACE_STUCK_SPOOL_DETECTION "
                    "ENABLE=0 to disable this check.")
         assert unit._ace.commands == []
         # The AFC pause was tried first; when it raised, the console pause took over.
@@ -7165,7 +7165,7 @@ class TestAfcACEHandleStuck:
         assert unit.printer.afc.error.AFC_error.calls == [(
             ("ACE stuck spool detected on Ace_1 lane lane1: feed assist ran continuously "
              "for 5.0s (>= 4.0s threshold). The spool is likely tangled or jammed at the "
-             "unit. Clear the snag, then resume. Run ACE_STUCK_SPOOL_DETECTION ENABLE=0 "
+             "unit. Clear the snag, then resume. Run AFC_ACE_STUCK_SPOOL_DETECTION ENABLE=0 "
              "to disable this check.",), {"pause": True})]
         assert unit.printer.gcode.run_script_from_command.calls == []
         assert unit.printer.logger.messages == []
@@ -7181,16 +7181,16 @@ class TestAfcACEHandleStuck:
         assert unit.printer.afc.error.AFC_error.calls == [(
             ("ACE stuck spool detected on Ace_1 lane lane1: feed assist ran continuously "
              "for 7.5s (>= 4.0s threshold). The spool is likely tangled or jammed at the "
-             "unit. Clear the snag, then resume. Run ACE_STUCK_SPOOL_DETECTION ENABLE=0 "
+             "unit. Clear the snag, then resume. Run AFC_ACE_STUCK_SPOOL_DETECTION ENABLE=0 "
              "to disable this check.",), {"pause": True})]
 
 
-class TestAfcACECmdACEStuckSpoolDetection:
+class TestAfcACECmdAFCACEStuckSpoolDetection:
     def test_enable_on(self):
         unit = ace_p2_unit()
         unit._stuck_tripped = True
 
-        unit.cmd_ACE_STUCK_SPOOL_DETECTION(make_gcmd(ENABLE=1))
+        unit.cmd_AFC_ACE_STUCK_SPOOL_DETECTION(make_gcmd(ENABLE=1))
 
         assert unit._stuck_detection is True
         # Enabling leaves the latch as it was.
@@ -7203,7 +7203,7 @@ class TestAfcACECmdACEStuckSpoolDetection:
         unit = ace_p2_unit(values={"stuck_spool_detection": True})
         unit._stuck_tripped = True
 
-        unit.cmd_ACE_STUCK_SPOOL_DETECTION(make_gcmd(ENABLE=0))
+        unit.cmd_AFC_ACE_STUCK_SPOOL_DETECTION(make_gcmd(ENABLE=0))
 
         assert unit._stuck_detection is False
         assert unit._stuck_tripped is False
@@ -7214,7 +7214,7 @@ class TestAfcACECmdACEStuckSpoolDetection:
         unit = ace_p2_unit(values={"stuck_spool_detection": True})
         unit._stuck_tripped = True
 
-        unit.cmd_ACE_STUCK_SPOOL_DETECTION(make_gcmd(STUCK_TIME=6.0))
+        unit.cmd_AFC_ACE_STUCK_SPOOL_DETECTION(make_gcmd(STUCK_TIME=6.0))
 
         assert unit._stuck_time == 6.0
         assert unit._stuck_detection is True

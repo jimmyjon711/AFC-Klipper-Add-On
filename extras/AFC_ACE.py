@@ -267,7 +267,7 @@ class afcACE(afcUnit):
         :param config: Klipper ConfigWrapper for this unit section. Reads the
             serial port, mode, feed/retract speeds, dryer and stuck-detection
             limits, feed-assist options, calibration step sizes and FPS
-            thresholds, then registers the per-unit and base ACE_* gcode
+            thresholds, then registers the per-unit and base AFC_ACE_* gcode
             commands and the temperature_ace sensor factory.
         """
         super().__init__(config)
@@ -317,10 +317,10 @@ class afcACE(afcUnit):
         # Extra mm (beyond dist_hub) to retract when ejecting a hub-staged lane,
         # so the filament clears the hub and pulls fully back into the unit.
         self.eject_buffer = config.getfloat("eject_buffer", 475.0, minval=0.0)
-        # Safety cap on the dryer set-point, ACE_DRY clamps the commanded temp
+        # Safety cap on the dryer set-point, AFC_ACE_DRY clamps the commanded temp
         # to this to avoid cooking filament / over-driving the heater.
         self.max_dryer_temperature = config.getfloat("max_dryer_temperature", 55.0, minval=0.0)
-        # ACE_DRY ROTATE=1 turns free spools while drying: every
+        # AFC_ACE_DRY ROTATE=1 turns free spools while drying: every
         # dry_rotate_interval seconds each lane whose slot has nothing in the
         # feed gears gets a slow dry_rotate_length mm rollback. The spool and
         # the gears share the slot's motor, so the spool turns and no filament
@@ -348,7 +348,7 @@ class afcACE(afcUnit):
         self._ace: Optional[ACEConnection] = None
         self._slot_map: dict[str, int] = {}
         self._feed_assist_active: set[int] = set()
-        # Slots manually stopped via ACE_FEED_ASSIST ENABLE=0. The watchdog and
+        # Slots manually stopped via AFC_ACE_FEED_ASSIST ENABLE=0. The watchdog and
         # event reconcile won't restart these; any explicit start (the command
         # with ENABLE=1 or a load/toolchange path) clears the suppression.
         self._assist_suppressed: set[int] = set()
@@ -356,7 +356,7 @@ class afcACE(afcUnit):
         self._stuck_tripped = False
         self._slot_inventory: List[Dict[str, Any]] = [{} for _ in range(self.SLOTS_PER_UNIT)]
         self._operation_active = False
-        # Drying spool rotation (ACE_DRY ROTATE=1): the reactor timer, when the
+        # Drying spool rotation (AFC_ACE_DRY ROTATE=1): the reactor timer, when the
         # cycle was started, and the slot being turned right now.
         self._dry_rotate_timer: Any = None
         self._dry_rotate_started = 0.0
@@ -370,7 +370,7 @@ class afcACE(afcUnit):
         # read by get_status for each lane's buffer state.
         self._cached_sensor_state: Dict[str, Any] = {}
         # Last-seen "current action" (preload/feeding/rollback/…) derived from
-        # the hardware status, for transition logging + ACE_STATUS. '' = idle.
+        # the hardware status, for transition logging + AFC_ACE_STATUS. '' = idle.
         self._current_action = ""
         self._prev_states_stale = False
         self._prev_slot_states: dict[str, bool] = {}
@@ -384,48 +384,62 @@ class afcACE(afcUnit):
         self._hw_status_time: Optional[float] = None
 
         self.gcode: GCodeDispatch = self.printer.lookup_object('gcode')
-        # Mux commands keyed by UNIT=, like AFC_OpenAMS, so no per-unit name
-        # suffix can be truncated by Klipper's gcode parser.
-        for cmd, handler, desc in (
-            ('ACE_CALIBRATE', self.cmd_ACE_CALIBRATE, "Calibrate ACE feed distance to toolhead"),
-            ('ACE_BUFFER_STATE', self.cmd_ACE_BUFFER_STATE,
-             "Report each lane's ACE buffer sensors (buf_rst/buf_back)"),
-            ('ACE_CALIBRATE_HUB', self.cmd_ACE_CALIBRATE_HUB, "Calibrate ACE feed distance to hub"),
-            ('ACE_STATUS', self.cmd_ACE_STATUS, "Query ACE hardware status"),
-            # Expose to UI
-            ('ACE_DRY', self.cmd_ACE_DRY, "Start ACE filament dryer"),
-            # Expose to UI
-            ('ACE_DRY_STOP', self.cmd_ACE_DRY_STOP, "Stop ACE filament dryer"),
-            # Expost to UI
-            ('ACE_LANE_RESET', self.cmd_ACE_LANE_RESET, "Retract ACE lane filament back into unit"),
-            ('ACE_FEED_ASSIST', self.cmd_ACE_FEED_ASSIST,
-             "Start/stop feed assist for a lane/slot (stop overrides "
-             "watchdog until started again)"),
-            ('ACE_CMD', self.cmd_ACE_CMD, "Send a raw ACE protocol command and print the reply"),
-            # Expose to UI
-            ('ACE_TEMP_INFO', self.cmd_ACE_TEMP_INFO,
-             "Report ACE box/PTC/environment temperatures and humidity"),
-            ('ACE_MATERIAL_INFO', self.cmd_ACE_MATERIAL_INFO,
-             "Read a slot's stored (NVM) material name and status"),
-            ('ACE_SET_MATERIAL', self.cmd_ACE_SET_MATERIAL,
-             "Write a slot's stored material name (ACE2; persists to NVM)"),
-            ('ACE_SENSOR_STATE', self.cmd_ACE_SENSOR_STATE,
-             "Read the ACE2 17-channel filament-sensor bitmask"),
-            ('ACE_FEED_TEST', self.cmd_ACE_FEED_TEST,
-             "Sweep feed speed to test whether it changes feed rate"),
-            ('ACE_STUCK_SPOOL_DETECTION', self.cmd_ACE_STUCK_SPOOL_DETECTION,
-             "Enable/disable ACE stuck spool detection"),
-            ('ACE_FEED_INFO', self.cmd_ACE_FEED_INFO,
-             "Per-slot feed diagnostics (steps/length/encoder) for feed-check tuning"),
-            ('ACE_RFID_DUMP', self.cmd_ACE_RFID_DUMP,
-             "Dump full raw RFID/filament-info read for a slot"),
-            ('ACE_RFID_RESCAN', self.cmd_ACE_RFID_RESCAN,
-             "Read a lane's spool tag again and apply it to the lane (ACE 2: "
-             "turns the spool past the reader; V1: asks the firmware)"),
-            ('ACE_FAN', self.cmd_ACE_FAN,
-             "Set ACE unit fan speed (ACE2: 0-100%; V1: ignored by firmware)"),
-        ):
-            self.gcode.register_mux_command(cmd, "UNIT", self.name, handler, desc=desc)
+
+        self.gcode.register_mux_command('AFC_ACE_CALIBRATE', "UNIT", self.name,
+                                        self.cmd_AFC_ACE_CALIBRATE,
+                                        desc=self.cmd_AFC_ACE_CALIBRATE_help)
+        self.gcode.register_mux_command('AFC_ACE_BUFFER_STATE', "UNIT", self.name,
+                                        self.cmd_AFC_ACE_BUFFER_STATE,
+                                        desc=self.cmd_AFC_ACE_BUFFER_STATE_help)
+        self.gcode.register_mux_command('AFC_ACE_CALIBRATE_HUB', "UNIT", self.name,
+                                        self.cmd_AFC_ACE_CALIBRATE_HUB,
+                                        desc=self.cmd_AFC_ACE_CALIBRATE_HUB_help)
+        self.gcode.register_mux_command('AFC_ACE_STATUS', "UNIT", self.name,
+                                        self.cmd_AFC_ACE_STATUS, desc=self.cmd_AFC_ACE_STATUS_help)
+        self.gcode.register_mux_command('AFC_ACE_LANE_RESET', "UNIT", self.name,
+                                        self.cmd_AFC_ACE_LANE_RESET,
+                                        desc=self.cmd_AFC_ACE_LANE_RESET_help)
+        self.gcode.register_mux_command('AFC_ACE_FEED_ASSIST', "UNIT", self.name,
+                                        self.cmd_AFC_ACE_FEED_ASSIST,
+                                        desc=self.cmd_AFC_ACE_FEED_ASSIST_help)
+        self.gcode.register_mux_command('AFC_ACE_CMD', "UNIT", self.name, self.cmd_AFC_ACE_CMD,
+                                        desc=self.cmd_AFC_ACE_CMD_help)
+        self.gcode.register_mux_command('AFC_ACE_MATERIAL_INFO', "UNIT", self.name,
+                                        self.cmd_AFC_ACE_MATERIAL_INFO,
+                                        desc=self.cmd_AFC_ACE_MATERIAL_INFO_help)
+        self.gcode.register_mux_command('AFC_ACE_SET_MATERIAL', "UNIT", self.name,
+                                        self.cmd_AFC_ACE_SET_MATERIAL,
+                                        desc=self.cmd_AFC_ACE_SET_MATERIAL_help)
+        self.gcode.register_mux_command('AFC_ACE_SENSOR_STATE', "UNIT", self.name,
+                                        self.cmd_AFC_ACE_SENSOR_STATE,
+                                        desc=self.cmd_AFC_ACE_SENSOR_STATE_help)
+        self.gcode.register_mux_command('AFC_ACE_FEED_TEST', "UNIT", self.name,
+                                        self.cmd_AFC_ACE_FEED_TEST,
+                                    desc=self.cmd_AFC_ACE_FEED_TEST_help)
+        self.gcode.register_mux_command('AFC_ACE_STUCK_SPOOL_DETECTION', "UNIT", self.name,
+                                        self.cmd_AFC_ACE_STUCK_SPOOL_DETECTION,
+                                        desc=self.cmd_AFC_ACE_STUCK_SPOOL_DETECTION_help)
+        self.gcode.register_mux_command('AFC_ACE_FEED_INFO', "UNIT", self.name,
+                                        self.cmd_AFC_ACE_FEED_INFO,
+                                        desc=self.cmd_AFC_ACE_FEED_INFO_help)
+        self.gcode.register_mux_command('AFC_ACE_RFID_DUMP', "UNIT", self.name,
+                                        self.cmd_AFC_ACE_RFID_DUMP,
+                                        desc=self.cmd_AFC_ACE_RFID_DUMP_help)
+        self.gcode.register_mux_command('AFC_ACE_RFID_RESCAN', "UNIT", self.name,
+                                        self.cmd_AFC_ACE_RFID_RESCAN,
+                                        desc=self.cmd_AFC_ACE_RFID_RESCAN_help)
+        self.gcode.register_mux_command('AFC_ACE_FAN', "UNIT", self.name, self.cmd_AFC_ACE_FAN,
+                                        desc=self.cmd_AFC_ACE_FAN_help)
+        self.gcode.register_mux_command('AFC_ACE_TEMP_INFO', "UNIT", self.name,
+                                        self.cmd_AFC_ACE_TEMP_INFO,
+                                        desc=self.cmd_AFC_ACE_TEMP_INFO_help)
+        self.afc.function.register_mux_command(self.afc.show_macros, 'AFC_ACE_DRY', "UNIT",
+                                               self.name, self.cmd_AFC_ACE_DRY,
+                                               self.cmd_AFC_ACE_DRY_help,
+                                               self.cmd_AFC_ACE_DRY_options)
+        self.afc.function.register_mux_command(self.afc.show_macros, 'AFC_ACE_DRY_STOP', "UNIT",
+                                               self.name, self.cmd_AFC_ACE_DRY_STOP,
+                                               self.cmd_AFC_ACE_DRY_STOP_help)
 
         # Register the temperature_ace sensor factory for [temperature_sensor]
         # sections using sensor_type: temperature_ace.
@@ -833,7 +847,7 @@ class afcACE(afcUnit):
         # is most informative during a load/unload.
         action = self._derive_action(result)
         if action != self._current_action:
-            self.logger.info(
+            self.logger.debug(
                 f'ACE {self.name}: {(self._current_action or "idle")} -> {(action or "idle")}')
             self._current_action = action
         if self._operation_active:
@@ -1825,11 +1839,11 @@ class afcACE(afcUnit):
         Return the gcode command used to reset/retract a lane.
 
         :param lane: Lane to reset.
-        :param dis: Reset distance (unused; the ACE_LANE_RESET handler computes
+        :param dis: Reset distance (unused; the AFC_ACE_LANE_RESET handler computes
             the retract distance itself).
-        :return str: The ACE_LANE_RESET command for this unit and lane.
+        :return str: The AFC_ACE_LANE_RESET command for this unit and lane.
         """
-        return f"ACE_LANE_RESET UNIT={self.name} LANE={lane.name}"
+        return f"AFC_ACE_LANE_RESET UNIT={self.name} LANE={lane.name}"
 
     def _wait_first_connect(self) -> None:
         """
@@ -2001,7 +2015,8 @@ class afcACE(afcUnit):
 
         return total_fed, False
 
-    def cmd_ACE_BUFFER_STATE(self, gcmd: GCodeCommand) -> None:
+    cmd_AFC_ACE_BUFFER_STATE_help = "Report each lane's ACE buffer sensors (buf_rst/buf_back)"
+    def cmd_AFC_ACE_BUFFER_STATE(self, gcmd: GCodeCommand) -> None:
         """
         Report each lane's ACE buffer sensors (buf_rst / buf_back) and
         insert/empty, plus the shared buffer-feed sensor, decoded from
@@ -2009,12 +2024,12 @@ class afcACE(afcUnit):
 
         Usage
         -------
-        `ACE_BUFFER_STATE UNIT=<unit>`
+        `AFC_ACE_BUFFER_STATE UNIT=<unit>`
 
         Example
         -------
         ```
-        ACE_BUFFER_STATE UNIT=Ace2_1
+        AFC_ACE_BUFFER_STATE UNIT=Ace2_1
         ```
         """
         if (not self._ace
@@ -2024,11 +2039,11 @@ class afcACE(afcUnit):
         try:
             state = self._ace.get_sensor_state()
         except Exception as e:
-            gcmd.respond_info(f"ACE_BUFFER_STATE: {e}")
+            gcmd.respond_info(f"AFC_ACE_BUFFER_STATE: {e}")
             return
         slot_sensors = (state.get('slot_sensors') if isinstance(state, dict) else None)
         if not slot_sensors:
-            gcmd.respond_info("ACE_BUFFER_STATE: no per-slot sensor data (firmware without "
+            gcmd.respond_info("AFC_ACE_BUFFER_STATE: no per-slot sensor data (firmware without "
                               "GET_SENSOR_STATE, or unexpected reply).")
             return
         slot_to_lane = {v: k for k, v in self._slot_map.items()}
@@ -2596,57 +2611,59 @@ class afcACE(afcUnit):
         return True
 
     # ── Calibration commands ──
-    cmd_ACE_CALIBRATE_options = {
+    cmd_AFC_ACE_CALIBRATE_help = "Calibrate ACE feed distance to toolhead"
+    cmd_AFC_ACE_CALIBRATE_options = {
         "UNIT": {"type": "string", "default": ""},
         "LANE": {"type": "string", "default": ""},
     }
 
-    def cmd_ACE_CALIBRATE(self, gcmd: GCodeCommand) -> None:
+    def cmd_AFC_ACE_CALIBRATE(self, gcmd: GCodeCommand) -> None:
         """
         Calibrate ACE feed distance to toolhead for a lane.
 
         Usage
         -------
-        `ACE_CALIBRATE UNIT=<unit> LANE=<lane>`
+        `AFC_ACE_CALIBRATE UNIT=<unit> LANE=<lane>`
 
         Example
         -------
         ```
-        ACE_CALIBRATE UNIT=Ace_1 LANE=lane1
+        AFC_ACE_CALIBRATE UNIT=Ace_1 LANE=lane1
         ```
         """
         lane_name = gcmd.get('LANE', '')
         if (not lane_name
             or lane_name not in self.afc.lanes):
-            gcmd.respond_info("Usage: ACE_CALIBRATE LANE=<lane_name>")
+            gcmd.respond_info("Usage: AFC_ACE_CALIBRATE LANE=<lane_name>")
             return
         cur_lane = self.afc.lanes[lane_name]
         success, msg, dist = self.calibrate_bowden(cur_lane, self.calibration_step, 1.0)
         gcmd.respond_info(msg)
 
-    cmd_ACE_CALIBRATE_HUB_options = {
+    cmd_AFC_ACE_CALIBRATE_HUB_help = "Calibrate ACE feed distance to hub"
+    cmd_AFC_ACE_CALIBRATE_HUB_options = {
         "UNIT": {"type": "string", "default": ""},
         "LANE": {"type": "string", "default": ""},
     }
-    def cmd_ACE_CALIBRATE_HUB(self, gcmd: GCodeCommand) -> None:
+    def cmd_AFC_ACE_CALIBRATE_HUB(self, gcmd: GCodeCommand) -> None:
         """
         Calibrate ACE feed distance to hub sensor. Requires a physical
         (non-virtual) hub sensor.
 
         Usage
         -------
-        `ACE_CALIBRATE_HUB UNIT=<unit> LANE=<lane>`
+        `AFC_ACE_CALIBRATE_HUB UNIT=<unit> LANE=<lane>`
 
         Example
         -------
         ```
-        ACE_CALIBRATE_HUB UNIT=Ace_1 LANE=lane1
+        AFC_ACE_CALIBRATE_HUB UNIT=Ace_1 LANE=lane1
         ```
         """
         lane_name = gcmd.get('LANE', '')
         if (not lane_name
             or lane_name not in self.afc.lanes):
-            gcmd.respond_info("Usage: ACE_CALIBRATE_HUB LANE=<lane_name>")
+            gcmd.respond_info("Usage: AFC_ACE_CALIBRATE_HUB LANE=<lane_name>")
             return
         cur_lane = self.afc.lanes[lane_name]
         if (cur_lane.hub_obj
@@ -2656,19 +2673,20 @@ class afcACE(afcUnit):
         success, msg, dist = self._calibrate_hub_inner(cur_lane)
         gcmd.respond_info(msg)
 
-    def cmd_ACE_STATUS(self, gcmd: GCodeCommand) -> None:
+    cmd_AFC_ACE_STATUS_help = "Query ACE hardware status"
+    def cmd_AFC_ACE_STATUS(self, gcmd: GCodeCommand) -> None:
         """
         Query and display ACE hardware status: the derived current action and
         the raw status dict.
 
         Usage
         -------
-        `ACE_STATUS UNIT=<unit>`
+        `AFC_ACE_STATUS UNIT=<unit>`
 
         Example
         -------
         ```
-        ACE_STATUS UNIT=Ace_1
+        AFC_ACE_STATUS UNIT=Ace_1
         ```
         """
         if (not self._ace
@@ -2682,7 +2700,9 @@ class afcACE(afcUnit):
         except Exception as e:
             gcmd.respond_info(f"Error querying ACE: {e}")
 
-    def cmd_ACE_FEED_INFO(self, gcmd: GCodeCommand) -> None:
+    cmd_AFC_ACE_FEED_INFO_help = (
+        "Per-slot feed diagnostics (steps/length/encoder) for feed-check tuning")
+    def cmd_AFC_ACE_FEED_INFO(self, gcmd: GCodeCommand) -> None:
         """
         Query per-slot feed diagnostics (steps / commanded length / encoder
         reading) for tuning feed_check_length / feed_error_length. The ACE2
@@ -2692,12 +2712,12 @@ class afcACE(afcUnit):
 
         Usage
         -------
-        `ACE_FEED_INFO UNIT=<unit>`
+        `AFC_ACE_FEED_INFO UNIT=<unit>`
 
         Example
         -------
         ```
-        ACE_FEED_INFO UNIT=Ace2_1
+        AFC_ACE_FEED_INFO UNIT=Ace2_1
         ```
         """
         if (not self._ace
@@ -2723,7 +2743,8 @@ class afcACE(afcUnit):
             lines.append(f"  slot {i}: {fi.get('steps', 0)} / {length} / {decoder} / {ratio:.3f}")
         gcmd.respond_info("\n".join(lines))
 
-    def cmd_ACE_RFID_DUMP(self, gcmd: GCodeCommand) -> None:
+    cmd_AFC_ACE_RFID_DUMP_help = "Dump full raw RFID/filament-info read for a slot"
+    def cmd_AFC_ACE_RFID_DUMP(self, gcmd: GCodeCommand) -> None:
         """
         Dump the full raw RFID/filament-info read for a slot, every protobuf
         field, not just the sku/type/color we normally use. The ACE 2 carries
@@ -2732,12 +2753,12 @@ class afcACE(afcUnit):
 
         Usage
         -------
-        `ACE_RFID_DUMP UNIT=<unit> [SLOT=<0-based slot>] [LANE=<lane>]`
+        `AFC_ACE_RFID_DUMP UNIT=<unit> [SLOT=<0-based slot>] [LANE=<lane>]`
 
         Example
         -------
         ```
-        ACE_RFID_DUMP UNIT=Ace2_1 SLOT=1
+        AFC_ACE_RFID_DUMP UNIT=Ace2_1 SLOT=1
         ```
         """
         if (not self._ace
@@ -2765,7 +2786,10 @@ class afcACE(afcUnit):
 
     #: How long a V1 rescan waits for the firmware to finish recognizing a tag.
     RESCAN_RECOGNIZE_S = 5.0
-    def cmd_ACE_RFID_RESCAN(self, gcmd: GCodeCommand) -> None:
+    cmd_AFC_ACE_RFID_RESCAN_help = (
+        "Read a lane's spool tag again and apply it to the lane (ACE 2: turns the "
+        "spool past the reader; V1: asks the firmware)")
+    def cmd_AFC_ACE_RFID_RESCAN(self, gcmd: GCodeCommand) -> None:
         """
         Read a lane's spool tag again and apply it to the lane.
 
@@ -2781,12 +2805,12 @@ class afcACE(afcUnit):
 
         Usage
         -------
-        `ACE_RFID_RESCAN UNIT=<unit> LANE=<lane> [DIST=<mm>] [SPEED=<mm/s>]`
+        `AFC_ACE_RFID_RESCAN UNIT=<unit> LANE=<lane> [DIST=<mm>] [SPEED=<mm/s>]`
 
         Example
         -------
         ```
-        ACE_RFID_RESCAN UNIT=Ace2_1 LANE=lane2
+        AFC_ACE_RFID_RESCAN UNIT=Ace2_1 LANE=lane2
         ```
         """
         lane_name = gcmd.get('LANE')
@@ -2798,7 +2822,7 @@ class afcACE(afcUnit):
             rfid: Any = self.printer.lookup_object("AFC_ACE2_rfid", None)
             if (rfid is None
                 or getattr(rfid, "ace2", None) is not self):
-                error_str = (f"ACE_RFID_RESCAN on {self.name} needs "
+                error_str = (f"AFC_ACE_RFID_RESCAN on {self.name} needs "
                              f"[AFC_ACE2_rfid] bound to this unit")
                 raise gcmd.error(error_str)
             rfid.rescan_lane(lane_name, gcmd)
@@ -2904,7 +2928,8 @@ class afcACE(afcUnit):
             out[k.strip().strip('"').strip("'")] = conv(val)
         return out or None
 
-    def cmd_ACE_CMD(self, gcmd: GCodeCommand) -> None:
+    cmd_AFC_ACE_CMD_help = "Send a raw ACE protocol command and print the reply"
+    def cmd_AFC_ACE_CMD(self, gcmd: GCodeCommand) -> None:
         """
         Send a raw ACE protocol command and print the reply, for probing
         which protocol methods this firmware actually supports.
@@ -2916,13 +2941,13 @@ class afcACE(afcUnit):
 
         Usage
         -------
-        `ACE_CMD UNIT=<unit> METHOD=<method> [PARAMS=<json-ish>]`
+        `AFC_ACE_CMD UNIT=<unit> METHOD=<method> [PARAMS=<json-ish>]`
 
         Example
         -------
         ```
-        ACE_CMD UNIT=Ace_1 METHOD=get_status
-        ACE_CMD UNIT=Ace_1 METHOD=set_filament_info PARAMS={index:0,type:PLA,color:[255,0,0]}
+        AFC_ACE_CMD UNIT=Ace_1 METHOD=get_status
+        AFC_ACE_CMD UNIT=Ace_1 METHOD=set_filament_info PARAMS={index:0,type:PLA,color:[255,0,0]}
         ```
         """
         if (not self._ace
@@ -2931,20 +2956,22 @@ class afcACE(afcUnit):
             return
         method = gcmd.get('METHOD', '')
         if not method:
-            gcmd.respond_info("ACE_CMD: METHOD=<method> required")
+            gcmd.respond_info("AFC_ACE_CMD: METHOD=<method> required")
             return
         try:
             params = self._parse_ace_params(gcmd.get('PARAMS', ''))
         except Exception as e:
-            gcmd.respond_info(f"ACE_CMD: bad PARAMS ({e}), e.g. " f"PARAMS={{index:0,type:PLA}}")
+            gcmd.respond_info(
+                f"AFC_ACE_CMD: bad PARAMS ({e}), e.g. PARAMS={{index:0,type:PLA}}")
             return
         try:
             resp = self._ace.send_command(method, params=params)
-            gcmd.respond_info(f"ACE_CMD {method}: OK -> {resp}")
+            gcmd.respond_info(f"AFC_ACE_CMD {method}: OK -> {resp}")
         except Exception as e:
-            gcmd.respond_info(f"ACE_CMD {method}: {e}")
+            gcmd.respond_info(f"AFC_ACE_CMD {method}: {e}")
 
-    def cmd_ACE_TEMP_INFO(self, gcmd: GCodeCommand) -> None:
+    cmd_AFC_ACE_TEMP_INFO_help = "Report ACE box/PTC/environment temperatures and humidity"
+    def cmd_AFC_ACE_TEMP_INFO(self, gcmd: GCodeCommand) -> None:
         """
         Report the ACE unit's temperature and humidity channels, box heater
         sensors, PTC (dryer) sensors and the enclosure environment. On the ACE2
@@ -2953,12 +2980,12 @@ class afcACE(afcUnit):
 
         Usage
         -------
-        `ACE_TEMP_INFO UNIT=<unit>`
+        `AFC_ACE_TEMP_INFO UNIT=<unit>`
 
         Example
         -------
         ```
-        ACE_TEMP_INFO UNIT=Ace2_1
+        AFC_ACE_TEMP_INFO UNIT=Ace2_1
         ```
         """
         if (not self._ace
@@ -2968,30 +2995,31 @@ class afcACE(afcUnit):
         try:
             temp = self._ace.get_temp()
         except Exception as e:
-            gcmd.respond_info(f"ACE_TEMP_INFO: {e}")
+            gcmd.respond_info(f"AFC_ACE_TEMP_INFO: {e}")
             return
         if not isinstance(temp, dict):
-            gcmd.respond_info(f"ACE_TEMP_INFO: unexpected reply {temp}")
+            gcmd.respond_info(f"AFC_ACE_TEMP_INFO: unexpected reply {temp}")
             return
         gcmd.respond_info("ACE temperatures:\n"
             f"  box1={temp.get('box1_temp', 'n/a')}  box2={temp.get('box2_temp', 'n/a')}\n"
             f"  ptc1={temp.get('ptc1_temp', 'n/a')}  ptc2={temp.get('ptc2_temp', 'n/a')}\n"
             f"  env={temp.get('env_temp', 'n/a')}  humidity={temp.get('env_humidity', 'n/a')}")
 
-    def cmd_ACE_MATERIAL_INFO(self, gcmd: GCodeCommand) -> None:
+    cmd_AFC_ACE_MATERIAL_INFO_help = "Read a slot's stored (NVM) material name and status"
+    def cmd_AFC_ACE_MATERIAL_INFO(self, gcmd: GCodeCommand) -> None:
         """
         Read a slot's stored material name + status (ACE2 GET_MATERIAL_INFO).
-        This is the NVM-persisted name written by ACE_SET_MATERIAL, distinct
+        This is the NVM-persisted name written by AFC_ACE_SET_MATERIAL, distinct
         from the live RFID tag read. Read-only. SLOT defaults to 0.
 
         Usage
         -------
-        `ACE_MATERIAL_INFO UNIT=<unit> [SLOT=<n>]`
+        `AFC_ACE_MATERIAL_INFO UNIT=<unit> [SLOT=<n>]`
 
         Example
         -------
         ```
-        ACE_MATERIAL_INFO UNIT=Ace2_1 SLOT=0
+        AFC_ACE_MATERIAL_INFO UNIT=Ace2_1 SLOT=0
         ```
         """
         if (not self._ace
@@ -3002,16 +3030,17 @@ class afcACE(afcUnit):
         try:
             info = self._ace.get_material_info(slot)
         except Exception as e:
-            gcmd.respond_info(f"ACE_MATERIAL_INFO: {e}")
+            gcmd.respond_info(f"AFC_ACE_MATERIAL_INFO: {e}")
             return
         if not isinstance(info, dict):
-            gcmd.respond_info(f"ACE_MATERIAL_INFO: unexpected reply {info}")
+            gcmd.respond_info(f"AFC_ACE_MATERIAL_INFO: unexpected reply {info}")
             return
         name = info.get('material_name', '')
         gcmd.respond_info(
             f"ACE material info slot {slot}: name={name!r} status={info.get('status', 0)}")
 
-    def cmd_ACE_SET_MATERIAL(self, gcmd: GCodeCommand) -> None:
+    cmd_AFC_ACE_SET_MATERIAL_help = "Write a slot's stored material name (ACE2; persists to NVM)"
+    def cmd_AFC_ACE_SET_MATERIAL(self, gcmd: GCodeCommand) -> None:
         """
         Write a slot's stored material name (ACE2 SET_MATERIAL_NAME).
         Persists to the unit's NVM and clears the slot status byte, then reads
@@ -3019,12 +3048,12 @@ class afcACE(afcUnit):
 
         Usage
         -------
-        `ACE_SET_MATERIAL UNIT=<unit> SLOT=<n> NAME=<text>`
+        `AFC_ACE_SET_MATERIAL UNIT=<unit> SLOT=<n> NAME=<text>`
 
         Example
         -------
         ```
-        ACE_SET_MATERIAL UNIT=Ace2_1 SLOT=0 NAME=PLA
+        AFC_ACE_SET_MATERIAL UNIT=Ace2_1 SLOT=0 NAME=PLA
         ```
         """
         if (not self._ace
@@ -3032,43 +3061,44 @@ class afcACE(afcUnit):
             gcmd.respond_info("ACE not connected")
             return
         if not hasattr(self._ace, "set_material_name"):
-            gcmd.respond_info("ACE_SET_MATERIAL: requires an ACE 2 Pro unit")
+            gcmd.respond_info("AFC_ACE_SET_MATERIAL: requires an ACE 2 Pro unit")
             return
         slot = gcmd.get_int('SLOT', None, minval=0)
         if slot is None:
-            gcmd.respond_info("ACE_SET_MATERIAL: SLOT=<n> required")
+            gcmd.respond_info("AFC_ACE_SET_MATERIAL: SLOT=<n> required")
             return
         name = gcmd.get('NAME', None)
         if name is None:
-            gcmd.respond_info("ACE_SET_MATERIAL: NAME=<text> required")
+            gcmd.respond_info("AFC_ACE_SET_MATERIAL: NAME=<text> required")
             return
         try:
             self._ace.set_material_name(slot, name)
         except Exception as e:
-            gcmd.respond_info(f"ACE_SET_MATERIAL: {e}")
+            gcmd.respond_info(f"AFC_ACE_SET_MATERIAL: {e}")
             return
         # Read back so the operator sees exactly what the unit stored.
         try:
             info = self._ace.get_material_info(slot)
             stored = info.get('material_name', '') if isinstance(info, dict) else info
-            gcmd.respond_info(f"ACE_SET_MATERIAL slot {slot}: stored name={stored!r}")
+            gcmd.respond_info(f"AFC_ACE_SET_MATERIAL slot {slot}: stored name={stored!r}")
         except Exception as e:
             gcmd.respond_info(
-                f"ACE_SET_MATERIAL slot {slot}: wrote {name!r} (read-back failed: {e})")
+                f"AFC_ACE_SET_MATERIAL slot {slot}: wrote {name!r} (read-back failed: {e})")
 
-    def cmd_ACE_SENSOR_STATE(self, gcmd: GCodeCommand) -> None:
+    cmd_AFC_ACE_SENSOR_STATE_help = "Read the ACE2 17-channel filament-sensor bitmask"
+    def cmd_AFC_ACE_SENSOR_STATE(self, gcmd: GCodeCommand) -> None:
         """
         Read the ACE2 17-channel filament-sensor bitmask (GET_SENSOR_STATE) and
         report the raw mask and triggered channels. Read-only diagnostic.
 
         Usage
         -------
-        `ACE_SENSOR_STATE UNIT=<unit>`
+        `AFC_ACE_SENSOR_STATE UNIT=<unit>`
 
         Example
         -------
         ```
-        ACE_SENSOR_STATE UNIT=Ace2_1
+        AFC_ACE_SENSOR_STATE UNIT=Ace2_1
         ```
         """
         if (not self._ace
@@ -3078,10 +3108,10 @@ class afcACE(afcUnit):
         try:
             state = self._ace.get_sensor_state()
         except Exception as e:
-            gcmd.respond_info(f"ACE_SENSOR_STATE: {e}")
+            gcmd.respond_info(f"AFC_ACE_SENSOR_STATE: {e}")
             return
         if not isinstance(state, dict):
-            gcmd.respond_info(f"ACE_SENSOR_STATE: unexpected reply {state}")
+            gcmd.respond_info(f"AFC_ACE_SENSOR_STATE: unexpected reply {state}")
             return
         mask = state.get('sensor_bitmask', 0)
         sensors = state.get('sensors', [])
@@ -3129,14 +3159,15 @@ class afcACE(afcUnit):
             elapsed += 0.2
         return False
 
-    cmd_ACE_FEED_TEST_options = {
+    cmd_AFC_ACE_FEED_TEST_help = "Sweep feed speed to test whether it changes feed rate"
+    cmd_AFC_ACE_FEED_TEST_options = {
         "SLOT":   {"type": "int",   "default": -1},
         "LENGTH": {"type": "float", "default": 100.0},
         "START":  {"type": "int",   "default": 10},
         "END":    {"type": "int",   "default": 250},
         "STEP":   {"type": "int",   "default": 20},
     }
-    def cmd_ACE_FEED_TEST(self, gcmd: GCodeCommand) -> None:
+    def cmd_AFC_ACE_FEED_TEST(self, gcmd: GCodeCommand) -> None:
         """
         Sweep the ACE feed/unwind speed to see whether the speed param
         actually changes the feed rate. For each speed it feeds LENGTH mm, times
@@ -3150,12 +3181,12 @@ class afcACE(afcUnit):
 
         Usage
         -------
-        `ACE_FEED_TEST UNIT=<unit> [SLOT=<n>] [LENGTH=100] [START=10] [END=250] [STEP=20]`
+        `AFC_ACE_FEED_TEST UNIT=<unit> [SLOT=<n>] [LENGTH=100] [START=10] [END=250] [STEP=20]`
 
         Example
         -------
         ```
-        ACE_FEED_TEST UNIT=Ace_1 SLOT=0 LENGTH=100
+        AFC_ACE_FEED_TEST UNIT=Ace_1 SLOT=0 LENGTH=100
         ```
         """
         if (not self._ace
@@ -3172,10 +3203,10 @@ class afcACE(afcUnit):
             slot = picked_slot if picked_slot is not None else -1
         if (slot < 0
             or slot >= self.SLOTS_PER_UNIT):
-            gcmd.respond_info("ACE_FEED_TEST: no loaded slot detected, pass SLOT=<n>")
+            gcmd.respond_info("AFC_ACE_FEED_TEST: no loaded slot detected, pass SLOT=<n>")
             return
         reactor = self.afc.reactor
-        gcmd.respond_info(f"ACE_FEED_TEST: slot {slot}, {length:.0f}mm, speeds "
+        gcmd.respond_info(f"AFC_ACE_FEED_TEST: slot {slot}, {length:.0f}mm, speeds "
                           f"{start}..{end} step {step} (feed + net-zero unwind each pass)")
         results = []
         speed = start
@@ -3198,7 +3229,7 @@ class afcACE(afcUnit):
                 self._poll_until_status(True, timeout=max(30.0, length / 2))
                 speed += step
         except Exception as e:
-            gcmd.respond_info(f"ACE_FEED_TEST aborted at speed {speed}: {e}")
+            gcmd.respond_info(f"AFC_ACE_FEED_TEST aborted at speed {speed}: {e}")
             self._wait_for_ace_ready()
             return
         if len(results) >= 2:
@@ -3214,21 +3245,22 @@ class afcACE(afcUnit):
             # Max effective speed: the lowest commanded speed that reaches ~95%
             # of the best measured rate.
             knee = next((spd for spd, r in rates if r >= 0.95 * peak), rates[-1][0])
-            gcmd.respond_info(f"ACE_FEED_TEST done. {verdict}\n"
+            gcmd.respond_info(f"AFC_ACE_FEED_TEST done. {verdict}\n"
                               f"  peak measured rate ~{peak:.0f} mm/s\n"
                               f"  max effective commanded speed ~{knee} "
                               f"(higher stops improving the rate)")
         else:
-            gcmd.respond_info("ACE_FEED_TEST done.")
+            gcmd.respond_info("AFC_ACE_FEED_TEST done.")
 
-    cmd_ACE_DRY_options = {
+    cmd_AFC_ACE_DRY_help = "Start ACE filament dryer"
+    cmd_AFC_ACE_DRY_options = {
         "UNIT": {"type": "string", "default": ""},
         "TEMP": {"type": "float", "default": 50.0},
         "DURATION": {"type": "float", "default": 90.0},
         "FAN": {"type": "int", "default": 7000},
         "ROTATE": {"type": "int", "default": 0},
     }
-    def cmd_ACE_DRY(self, gcmd: GCodeCommand) -> None:
+    def cmd_AFC_ACE_DRY(self, gcmd: GCodeCommand) -> None:
         """
         Start ACE filament dryer. TEMP is capped to max_dryer_temperature.
         The ACE Pro firmware ignores the fan speed and always runs its fan at
@@ -3241,12 +3273,12 @@ class afcACE(afcUnit):
 
         Usage
         -------
-        `ACE_DRY UNIT=<unit> TEMP=<C> DURATION=<minutes> [FAN=<rpm>] [ROTATE=<0|1>]`
+        `AFC_ACE_DRY UNIT=<unit> TEMP=<C> DURATION=<minutes> [FAN=<rpm>] [ROTATE=<0|1>]`
 
         Example
         -------
         ```
-        ACE_DRY UNIT=Ace_1 TEMP=50 DURATION=240 ROTATE=1
+        AFC_ACE_DRY UNIT=Ace_1 TEMP=50 DURATION=240 ROTATE=1
         ```
         """
         temp = gcmd.get_float('TEMP', 50.0)
@@ -3272,7 +3304,7 @@ class afcACE(afcUnit):
         if rotate:
             committed = self._dry_rotate_committed()
             if committed:
-                gcmd.respond_info(f"ACE_DRY: ROTATE disabled for {self.name} -- "
+                gcmd.respond_info(f"AFC_ACE_DRY: ROTATE disabled for {self.name} -- "
                                   f"{', '.join(committed)} still has filament loaded, and "
                                   f"turning another spool would take the motor off it. "
                                   f"Unload the lanes and leave the spools free to spin to "
@@ -3280,18 +3312,19 @@ class afcACE(afcUnit):
             else:
                 self._start_dry_rotate(gcmd)
 
-    def cmd_ACE_DRY_STOP(self, gcmd: GCodeCommand) -> None:
+    cmd_AFC_ACE_DRY_STOP_help = "Stop ACE filament dryer"
+    def cmd_AFC_ACE_DRY_STOP(self, gcmd: GCodeCommand) -> None:
         """
         Stop ACE filament dryer.
 
         Usage
         -------
-        `ACE_DRY_STOP UNIT=<unit>`
+        `AFC_ACE_DRY_STOP UNIT=<unit>`
 
         Example
         -------
         ```
-        ACE_DRY_STOP UNIT=Ace_1
+        AFC_ACE_DRY_STOP UNIT=Ace_1
         ```
         """
         if (not self._ace
@@ -3305,7 +3338,7 @@ class afcACE(afcUnit):
         except Exception as e:
             gcmd.respond_info(f"Error stopping dryer: {e}")
 
-    # ── Drying spool rotation (ACE_DRY ROTATE=1) ──
+    # ── Drying spool rotation (AFC_ACE_DRY ROTATE=1) ──
     #
     # The Bambu units' rule, per lane on the ACE's own hardware. A slot's spool
     # and its feed gears share one motor, so a rollback on a slot with nothing
@@ -3316,7 +3349,7 @@ class afcACE(afcUnit):
 
     #: dryer_status values that mean no cycle is running.
     _DRYER_IDLE = ("", "stop", "stopped", "stopping", "idle", "off", "none")
-    #: seconds after ACE_DRY before an idle dryer reading counts as "finished",
+    #: seconds after AFC_ACE_DRY before an idle dryer reading counts as "finished",
     #: so the heartbeat has time to report the new cycle.
     _DRY_ROTATE_GRACE = 60.0
     #: seconds between retries while rotation is held off.
@@ -3324,7 +3357,7 @@ class afcACE(afcUnit):
 
     @property
     def _dry_rotating(self) -> bool:
-        """Whether ACE_DRY ROTATE=1 is active on this unit."""
+        """Whether AFC_ACE_DRY ROTATE=1 is active on this unit."""
         return self._dry_rotate_timer is not None
 
     def _dry_rotate_committed(self) -> List[str]:
@@ -3357,7 +3390,7 @@ class afcACE(afcUnit):
         """
         Arm the rotation timer and say which lanes will turn.
 
-        :param gcmd: the ACE_DRY command, for the reply.
+        :param gcmd: the AFC_ACE_DRY command, for the reply.
         """
         reactor = self.afc.reactor
         now = reactor.monotonic()
@@ -3366,7 +3399,7 @@ class afcACE(afcUnit):
         self._dry_rotate_timer = reactor.register_timer(self._dry_rotate_tick, now + 5.0)
         free = [name for _, name in self._dry_rotate_free(self._cached_hw_status or {})]
         threaded = sorted(set(self._slot_map) - set(free))
-        msg = (f"ACE_DRY: rotating free spools on {self.name} every "
+        msg = (f"AFC_ACE_DRY: rotating free spools on {self.name} every "
                f"{self.dry_rotate_interval:.0f}s")
         if free:
             msg += f" ({', '.join(free)})"
@@ -3494,24 +3527,24 @@ class afcACE(afcUnit):
             if self._dry_rotate_timer is timer:
                 self._dry_rotate_slot = None
 
-    cmd_ACE_FAN_help = "Set the ACE unit fan speed"
-    def cmd_ACE_FAN(self, gcmd: GCodeCommand) -> None:
+    cmd_AFC_ACE_FAN_help = "Set ACE unit fan speed (ACE2: 0-100%; V1: ignored by firmware)"
+    def cmd_AFC_ACE_FAN(self, gcmd: GCodeCommand) -> None:
         """
         Set the ACE unit fan speed.
 
         On the ACE2 this drives SET_FAN (cmd 71); the firmware maps 0-100% to 5
         internal levels. On the V1 ACE the firmware ignores fan speed, so the
         command is accepted but has no effect. This controls the unit fan, which
-        is separate from the dryer cycle's own on/off fan (set via ACE_DRY FAN=).
+        is separate from the dryer cycle's own on/off fan (set via AFC_ACE_DRY FAN=).
 
         Usage
         -------
-        `ACE_FAN UNIT=<unit> SPEED=<0-100>`
+        `AFC_ACE_FAN UNIT=<unit> SPEED=<0-100>`
 
         Example
         -------
         ```
-        ACE_FAN UNIT=Ace2_1 SPEED=50
+        AFC_ACE_FAN UNIT=Ace2_1 SPEED=50
         ```
         """
         speed = gcmd.get_int('SPEED', 100, minval=0, maxval=100)
@@ -3526,30 +3559,34 @@ class afcACE(afcUnit):
         except Exception as e:
             gcmd.respond_info(f"Error setting fan: {e}")
 
-    def cmd_ACE_LANE_RESET(self, gcmd: GCodeCommand) -> None:
+    cmd_AFC_ACE_LANE_RESET_help = "Retract ACE lane filament back into unit"
+    def cmd_AFC_ACE_LANE_RESET(self, gcmd: GCodeCommand) -> None:
         """
         Retract lane filament back into ACE unit.
 
         Usage
         -------
-        `ACE_LANE_RESET UNIT=<unit> LANE=<lane>`
+        `AFC_ACE_LANE_RESET UNIT=<unit> LANE=<lane>`
 
         Example
         -------
         ```
-        ACE_LANE_RESET UNIT=Ace_1 LANE=lane1
+        AFC_ACE_LANE_RESET UNIT=Ace_1 LANE=lane1
         ```
         """
         lane_name = gcmd.get('LANE', '')
         if (not lane_name
             or lane_name not in self.afc.lanes):
-            gcmd.respond_info("Usage: ACE_LANE_RESET LANE=<lane_name>")
+            gcmd.respond_info("Usage: AFC_ACE_LANE_RESET LANE=<lane_name>")
             return
         cur_lane = self.afc.lanes[lane_name]
         self.eject_lane(cur_lane)
         gcmd.respond_info(f"Lane {lane_name} reset")
 
-    def cmd_ACE_FEED_ASSIST(self, gcmd: GCodeCommand) -> None:
+    cmd_AFC_ACE_FEED_ASSIST_help = (
+        "Start/stop feed assist for a lane/slot (stop overrides watchdog until "
+        "started again)")
+    def cmd_AFC_ACE_FEED_ASSIST(self, gcmd: GCodeCommand) -> None:
         """
         Manually start/stop feed assist for a lane or slot.
 
@@ -3559,12 +3596,12 @@ class afcACE(afcUnit):
 
         Usage
         -------
-        `ACE_FEED_ASSIST UNIT=<unit> ENABLE=<0|1> [LANE=<lane>] [SLOT=<n>]`
+        `AFC_ACE_FEED_ASSIST UNIT=<unit> ENABLE=<0|1> [LANE=<lane>] [SLOT=<n>]`
 
         Example
         -------
         ```
-        ACE_FEED_ASSIST UNIT=Ace_1 LANE=lane1 ENABLE=0
+        AFC_ACE_FEED_ASSIST UNIT=Ace_1 LANE=lane1 ENABLE=0
         ```
         """
         enable = gcmd.get_int('ENABLE', None)
@@ -3614,7 +3651,7 @@ class afcACE(afcUnit):
         disconnected.
 
         :param slot: 0-based ACE slot index.
-        :param explicit: True only for a user ACE_FEED_ASSIST ENABLE=1, the only
+        :param explicit: True only for a user AFC_ACE_FEED_ASSIST ENABLE=1, the only
             caller allowed to clear a manual ENABLE=0 suppression; automatic
             callers must leave it in place.
         """
@@ -3758,7 +3795,7 @@ class afcACE(afcUnit):
         lane = self.afc.lanes.get(name)
         if (slot is not None
             and slot in self._assist_suppressed):
-            return  # manually stopped via ACE_FEED_ASSIST, leave it off
+            return  # manually stopped via AFC_ACE_FEED_ASSIST, leave it off
         if (slot is not None
             and lane is not None
             and self._use_feed_assist(lane)
@@ -3826,7 +3863,7 @@ class afcACE(afcUnit):
         msg = (f"ACE stuck spool detected on {self.name}{lane_str}: feed assist ran "
                f"continuously for {cont_time:.1f}s (>= {self._stuck_time:.1f}s threshold). "
                "The spool is likely tangled or jammed at the unit. Clear the snag, then "
-               "resume. Run ACE_STUCK_SPOOL_DETECTION ENABLE=0 to disable this check.")
+               "resume. Run AFC_ACE_STUCK_SPOOL_DETECTION ENABLE=0 to disable this check.")
         try:
             # Route through AFC so it snapshots position and uses the AFC
             # pause/resume path (z-hop, restore on AFC_RESUME).
@@ -3835,19 +3872,19 @@ class afcACE(afcUnit):
             self.logger.error(msg)
             self.gcode.run_script_from_command("PAUSE")
 
-    cmd_ACE_STUCK_SPOOL_DETECTION_help = "Enable/disable ACE stuck spool detection"
-    def cmd_ACE_STUCK_SPOOL_DETECTION(self, gcmd: GCodeCommand) -> None:
+    cmd_AFC_ACE_STUCK_SPOOL_DETECTION_help = "Enable/disable ACE stuck spool detection"
+    def cmd_AFC_ACE_STUCK_SPOOL_DETECTION(self, gcmd: GCodeCommand) -> None:
         """
         Toggle stuck spool detection or adjust its threshold at runtime.
 
         Usage
         -------
-        `ACE_STUCK_SPOOL_DETECTION UNIT=<unit> [ENABLE=0|1] [STUCK_TIME=<seconds>]`
+        `AFC_ACE_STUCK_SPOOL_DETECTION UNIT=<unit> [ENABLE=0|1] [STUCK_TIME=<seconds>]`
 
         Example
         -------
         ```
-        ACE_STUCK_SPOOL_DETECTION UNIT=Ace_1 ENABLE=1 STUCK_TIME=6
+        AFC_ACE_STUCK_SPOOL_DETECTION UNIT=Ace_1 ENABLE=1 STUCK_TIME=6
         ```
         """
         enable = gcmd.get_int('ENABLE', None, minval=0, maxval=1)
@@ -5739,7 +5776,7 @@ class ACEConnection:
 
     # ---- Commands from Anycubic's ACE protocol ----
     # set_filament_info works (code 0); other protocol methods return 400
-    # InvalidCommand on this firmware, so probe with ACE_CMD before adding wrappers.
+    # InvalidCommand on this firmware, so probe with AFC_ACE_CMD before adding wrappers.
 
     def set_filament_info(self, slot_index: int, filament_type: str, color_rgb: Any) -> Any:
         """

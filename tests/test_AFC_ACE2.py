@@ -223,7 +223,7 @@ def ace2_jam_message(lane: str, what: str) -> str:
     """
     return (f"ACE2 Ace2_1 lane {lane}: {what}. The unit's filament encoder reports the "
             "spool is not moving with the motor, likely a jam or tangle at the unit. "
-            "Clear the snag, then resume. Run ACE_STUCK_SPOOL_DETECTION ENABLE=0 to "
+            "Clear the snag, then resume. Run AFC_ACE_STUCK_SPOOL_DETECTION ENABLE=0 to "
             "disable this check.")
 
 

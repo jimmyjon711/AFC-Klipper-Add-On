@@ -3682,7 +3682,7 @@ class TestAFCU1LaneHandleReady:
         lane = self._ready_lane()
         self._register_feeder(lane)
         lane._handle_ready()
-        assert lane.logger.messages == [("info", "Not starting timer for lane1")]
+        assert lane.logger.messages == [("debug", "Not starting timer for lane1")]
 
     def test_raises_when_feeder_missing(self):
         lane = self._ready_lane()
