@@ -31,6 +31,7 @@ UNIT_VARIANTS: dict[str, list[dict[str, str]]] = {
     "NightOwl": [{"nightowl_board_type": b} for b in ["ERB_2.0", "OWLFC_Mini"]],
     "ViViD": [{}],
     "OpenAMS": [{}],
+    "ACE": [{"ace_unit_type": v} for v in ["V1", "V2_Pro"]],
     "HTLF": [{"htlf_board_type": b} for b in ["ERB", "MMB_1.1", "MMB_1.0"]],
     "Claymore": [{"htlf2_board_type": "AFC_Lite"}],
     "QuattroBox": [
@@ -53,6 +54,7 @@ ADDITIONAL_UNIT_DEFAULT_NAME = {
     "ViViD": "Vivid_1",
     "QuattroBox": "QuattroBox_1",
     "OpenAMS": "AMS_1",
+    "ACE": "Ace_2",
     "EMU": "EMU_1",
     "HTLF": "HTLF_1",
     "Claymore": "Claymore_1",
@@ -102,7 +104,12 @@ def iter_cases():
                 yield f"copy_unit_files__{base_name}__{name_label}", "copy_unit_files", overrides
 
             # install_additional_unit: type-specific default name and a custom one.
-            default_add_name = ADDITIONAL_UNIT_DEFAULT_NAME[itype]
+            # ACE's default depends on which version variant this is (V1 ->
+            # Ace_2, V2_Pro -> Ace2_2), unlike every other type's static entry.
+            if itype == "ACE" and variant.get("ace_unit_type") == "V2_Pro":
+                default_add_name = "Ace2_2"
+            else:
+                default_add_name = ADDITIONAL_UNIT_DEFAULT_NAME[itype]
             for name_label, name_value in (
                 ("defaultname", default_add_name),
                 ("customname", "CustomName2"),
@@ -208,6 +215,26 @@ def iter_cases():
             "seed_files": "AFC_MMB_HTLF_1.cfg",
         },
     )
+    # ACE's default name prefix depends on ace_unit_type (V1 -> Ace, V2_Pro
+    # -> Ace2), unlike every other type's single static prefix.
+    yield (
+        "additional_default_name__ACE__V1__first-existing",
+        "additional_default_name",
+        {
+            "installation_type": "ACE",
+            "ace_unit_type": "V1",
+            "seed_files": "AFC_Ace_1.cfg",
+        },
+    )
+    yield (
+        "additional_default_name__ACE__V2_Pro__first-existing",
+        "additional_default_name",
+        {
+            "installation_type": "ACE",
+            "ace_unit_type": "V2_Pro",
+            "seed_files": "AFC_Ace2_1.cfg",
+        },
+    )
 
 
 def all_cases():
@@ -258,6 +285,7 @@ try:
             "Claymore",
             "QuattroBox",
             "OpenAMS",
+            "ACE",
             "ViViD",
             "EMU",
         ]
