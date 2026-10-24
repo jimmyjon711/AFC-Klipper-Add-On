@@ -4584,7 +4584,7 @@ def crc16_ccitt_reflected(data: bytes) -> int:
     return crc & 0xFFFF
 
 
-# ── ACE auto-discovery: serial_port: auto + ace_index ───────────────────────
+# ACE auto-discovery: serial_port: auto + ace_index
 # Chained V1 ACEs get ttyACMs that shuffle on re-enumeration, so a section binds to
 # the unit whose get_info id (cable order) matches its ace_index, re-resolved on each
 # connect. An explicit serial_port skips this.

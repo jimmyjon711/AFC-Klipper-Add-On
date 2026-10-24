@@ -761,7 +761,7 @@ def decode_frames(buffer: bytearray,
     return results
 
 
-# ── ACE2 auto-discovery: serial_port: auto + ace_index (V2 probe) ───────────
+# ACE2 auto-discovery: serial_port: auto + ace_index (V2 probe)
 # Like V1's autodetect with a V2 probe. ace_index orders units by USB topology
 # (cable order); the STM32 UID confirms an ACE 2 and allows pinning via ace_uid.
 # Only unclaimed ports are probed.
