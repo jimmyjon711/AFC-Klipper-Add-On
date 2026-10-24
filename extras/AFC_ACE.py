@@ -385,6 +385,19 @@ class afcACE(afcUnit):
 
         self.gcode: GCodeDispatch = self.printer.lookup_object('gcode')
 
+        # Defer serial connection until reactor is running (klippy:ready)
+        self.printer.register_event_handler("klippy:ready", self._handle_ready)
+        # Reconcile feed assist to the active lane on every tool load.
+        self.printer.register_event_handler("afc:tool_loaded", self._handle_tool_loaded)
+        # A tool pickup may not fire afc:tool_loaded, so also reconcile assist
+        # whenever the active extruder changes.
+        self.printer.register_event_handler("extruder:activate_extruder",
+                                            self._handle_extruder_activated)
+
+        # Hand the serial port and its autodetect claim back on every teardown:
+        # a FIRMWARE_RESTART keeps the process, so _ACE_CLAIMED_PORTS survives.
+        self.printer.register_event_handler("klippy:disconnect", self._handle_klippy_disconnect)
+
         self.gcode.register_mux_command('AFC_ACE_CALIBRATE', "UNIT", self.name,
                                         self.cmd_AFC_ACE_CALIBRATE,
                                         desc=self.cmd_AFC_ACE_CALIBRATE_help)
@@ -474,19 +487,6 @@ class afcACE(afcUnit):
         # False so the virtual hub reads clear until a sync or load sets it.
         for lane in self.lanes.values():
             lane._load_state = False
-
-        # TODO: move all registers into __init__
-        # Defer serial connection until reactor is running (klippy:ready)
-        self.printer.register_event_handler("klippy:ready", self._handle_ready)
-        # Reconcile feed assist to the active lane on every tool load.
-        self.printer.register_event_handler("afc:tool_loaded", self._handle_tool_loaded)
-        # A tool pickup may not fire afc:tool_loaded, so also reconcile assist
-        # whenever the active extruder changes.
-        self.printer.register_event_handler("extruder:activate_extruder",
-                                            self._handle_extruder_activated)
-        # Hand the serial port and its autodetect claim back on every teardown:
-        # a FIRMWARE_RESTART keeps the process, so _ACE_CLAIMED_PORTS survives.
-        self.printer.register_event_handler("klippy:disconnect", self._handle_klippy_disconnect)
 
     def _handle_klippy_disconnect(self) -> None:
         """
@@ -2151,6 +2151,8 @@ class afcACE(afcUnit):
         cur_lane.extruder_obj.clear_stale_sensor_state(cur_lane)
         self.afc.reactor.pause(self.afc.reactor.monotonic() + 2.0)
 
+        # Add 100mm extra to account for movement not being as accurate
+        unload_distance = distance + 100
         # Account for filament already at hub
         if cur_lane.loaded_to_hub:
             dist_hub = cur_lane.dist_hub
@@ -2162,10 +2164,10 @@ class afcACE(afcUnit):
         bowden_dist = round(distance, 2)
         cal_msg = f'\n afc_bowden_length: New: {bowden_dist} Old: {old_bowden}'
         cur_hub.afc_bowden_length = bowden_dist
-        cur_hub.afc_unload_bowden_length = bowden_dist
+        cur_hub.afc_unload_bowden_length = unload_distance
         self.afc.function.ConfigRewrite(cur_hub.fullname, "afc_bowden_length", bowden_dist, cal_msg)
-        self.afc.function.ConfigRewrite(cur_hub.fullname, "afc_unload_bowden_length", bowden_dist,
-                                        f'\n afc_unload_bowden_length: {bowden_dist}')
+        self.afc.function.ConfigRewrite(cur_hub.fullname, "afc_unload_bowden_length", unload_distance,
+                                        f'\n afc_unload_bowden_length: {unload_distance}')
 
         return (True, f"afc_bowden_length calibration: {bowden_dist}mm (was {old_bowden}mm)",
                 bowden_dist)

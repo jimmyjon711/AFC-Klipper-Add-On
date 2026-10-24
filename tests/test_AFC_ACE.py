@@ -3841,7 +3841,7 @@ class TestAfcACECalibrateBowdenInner:
         assert (ok, dist) == (True, 500.0)
         assert msg == "afc_bowden_length calibration: 500.0mm (was 900.0mm)"
         assert hub.afc_bowden_length == 500.0
-        assert hub.afc_unload_bowden_length == 500.0
+        assert hub.afc_unload_bowden_length == 600.0
         # Ten 50mm steps reach the sensor, then 5mm past it is retracted.
         assert wire.moves() == [self.STEP] * 10 + [
             ("unwind_filament", {"index": 0, "length": 505.0, "speed": 100.0,
@@ -3849,8 +3849,8 @@ class TestAfcACECalibrateBowdenInner:
         assert unit.afc.function.ConfigRewrite.calls == [
             (("AFC_hub Ace_1_hub", "afc_bowden_length", 500.0,
               "\n afc_bowden_length: New: 500.0 Old: 900.0"), {}),
-            (("AFC_hub Ace_1_hub", "afc_unload_bowden_length", 500.0,
-              "\n afc_unload_bowden_length: 500.0"), {})]
+            (("AFC_hub Ace_1_hub", "afc_unload_bowden_length", 600.0,
+              "\n afc_unload_bowden_length: 600.0"), {})]
         assert unit.logger.messages == [
             ("raw", "Calibrating afc_bowden_length for lane0 (max 6000mm in 50.0mm steps)"),
             ("info", "ACE calibration: sensor triggered at 500.0mm"),
@@ -3868,7 +3868,7 @@ class TestAfcACECalibrateBowdenInner:
         assert (ok, dist) == (True, 560.0)
         assert msg == "afc_bowden_length calibration: 560.0mm (was 900.0mm)"
         assert hub.afc_bowden_length == 560.0
-        assert hub.afc_unload_bowden_length == 560.0
+        assert hub.afc_unload_bowden_length == 600.0
         # The retract is the measured 500mm + 5, not the staged total.
         assert wire.moves() == [self.STEP] * 10 + [
             ("unwind_filament", {"index": 0, "length": 505.0, "speed": 100.0,
@@ -3876,8 +3876,8 @@ class TestAfcACECalibrateBowdenInner:
         assert unit.afc.function.ConfigRewrite.calls == [
             (("AFC_hub Ace_1_hub", "afc_bowden_length", 560.0,
               "\n afc_bowden_length: New: 560.0 Old: 900.0"), {}),
-            (("AFC_hub Ace_1_hub", "afc_unload_bowden_length", 560.0,
-              "\n afc_unload_bowden_length: 560.0"), {})]
+            (("AFC_hub Ace_1_hub", "afc_unload_bowden_length", 600.0,
+              "\n afc_unload_bowden_length: 600.0"), {})]
         assert unit.logger.messages == [
             ("raw", "Calibrating afc_bowden_length for lane0 (max 6000mm in 50.0mm steps)"),
             ("info", "ACE calibration: sensor triggered at 500.0mm"),
@@ -4884,11 +4884,12 @@ class TestAfcACECmdAFCACECalibrate:
 
         assert gcmd.responses == ["afc_bowden_length calibration: 50.0mm (was 900.0mm)"]
         assert lane.hub_obj.afc_bowden_length == 50.0
+        assert lane.hub_obj.afc_unload_bowden_length == 150.0
         assert unit.afc.function.ConfigRewrite.calls == [
             (("AFC_hub Ace_1_hub", "afc_bowden_length", 50.0,
               "\n afc_bowden_length: New: 50.0 Old: 900.0"), {}),
-            (("AFC_hub Ace_1_hub", "afc_unload_bowden_length", 50.0,
-              "\n afc_unload_bowden_length: 50.0"), {})]
+            (("AFC_hub Ace_1_hub", "afc_unload_bowden_length", 150.0,
+              "\n afc_unload_bowden_length: 150.0"), {})]
         # The first 50mm step trips the sensor, then 5mm past it is retracted.
         assert unit.logger.messages == [
             ("raw", "Calibrating afc_bowden_length for lane0 (max 6000mm in 50.0mm steps)"),
