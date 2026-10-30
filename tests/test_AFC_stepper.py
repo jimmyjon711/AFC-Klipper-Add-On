@@ -893,6 +893,76 @@ class TestInitEndstopsVirtualToolStart:
         assert tool_start_calls[0].args[1] == "^PD3"
 
 
+class TestInitEndstopsU1ToolStart:
+    """Exercises the U1-style motion sensor branch inside _init_endstops():
+    pin_tool_start is unset (u1_filament_sensor_name used instead), so the
+    extruder's software PollingEndstopWrapper is homed against instead of a
+    pin-based endstop."""
+
+    def _make_endstop_stepper(self, section_values, tool_start_endstop=None, name="lane1"):
+        s = TestInitEndstopsFpsPfsBuffer()._make_endstop_stepper(section_values, name)
+        s.extruder_obj = MagicMock()
+        s.extruder_obj.tool_start_endstop = tool_start_endstop
+        s.extruder_obj.get_tool_start_endstop_for_lane = MagicMock(
+            return_value=tool_start_endstop)
+        return s
+
+    def test_u1_sensor_registers_the_polling_endstop(self):
+        """Covers that _init_endstops asks for a per-lane clone (keyed on
+        this stepper's own name) instead of homing against the extruder's
+        shared tool_start_endstop directly."""
+        per_lane_endstop = MagicMock()
+        s = self._make_endstop_stepper({
+            ("AFC_extruder", "extruder", "pin_tool_start"): None,
+        }, tool_start_endstop=MagicMock())
+        s.extruder_obj.get_tool_start_endstop_for_lane = MagicMock(
+            return_value=per_lane_endstop)
+
+        s._init_endstops()
+
+        s.extruder_obj.get_tool_start_endstop_for_lane.assert_called_once_with("lane1")
+        tool_start_calls = [c for c in s._add_endstop.call_args_list
+                            if c.args[0] == "tool_start"]
+        assert len(tool_start_calls) == 1
+        assert tool_start_calls[0].args[1] is None
+        assert tool_start_calls[0].kwargs.get("mcu_endstop") is per_lane_endstop
+
+    def test_no_extruder_obj_falls_back_to_generic_none_pin_branch(self):
+        """Covers the double-getattr guard: when extruder_obj isn't set yet
+        (e.g. a stepper built outside normal lifecycle ordering), this must
+        not raise and should fall through like any other None pin."""
+        s = TestInitEndstopsFpsPfsBuffer()._make_endstop_stepper({
+            ("AFC_extruder", "extruder", "pin_tool_start"): None,
+        })
+        assert not hasattr(s, "extruder_obj")
+
+        s._init_endstops()  # should not raise
+
+        tool_start_calls = [c for c in s._add_endstop.call_args_list
+                            if c.args[0] == "tool_start"]
+        assert len(tool_start_calls) == 1
+        assert tool_start_calls[0].kwargs.get("mcu_endstop") is None
+
+    def test_real_pin_takes_priority_over_u1_endstop(self):
+        """A lane with both a real pin_tool_start AND a leftover
+        tool_start_endstop (shouldn't normally happen -- AFCExtruder only
+        builds one or the other) uses the pin, matching _init_endstops'
+        branch order."""
+        endstop = MagicMock()
+        s = self._make_endstop_stepper({
+            ("AFC_extruder", "extruder", "pin_tool_start"): "^PD3",
+        }, tool_start_endstop=endstop)
+
+        s._init_endstops()
+
+        tool_start_calls = [c for c in s._add_endstop.call_args_list
+                            if c.args[0] == "tool_start"]
+        assert len(tool_start_calls) == 1
+        assert tool_start_calls[0].args[1] == "^PD3"
+        assert tool_start_calls[0].kwargs.get("mcu_endstop") is None
+        s.extruder_obj.get_tool_start_endstop_for_lane.assert_not_called()
+
+
 class TestAddEndstopMcuEndstopParam:
     """Exercises _add_endstop's mcu_endstop parameter, which lets a
     pre-built MCU endstop (e.g. an FPS software endstop) be registered

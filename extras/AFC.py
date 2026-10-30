@@ -57,7 +57,7 @@ except: raise error(ERROR_STR.format(import_lib="AFC_utils", trace=traceback.for
 try: from extras.AFC_stats import AFCStats
 except: raise error(ERROR_STR.format(import_lib="AFC_stats", trace=traceback.format_exc()))
 
-AFC_VERSION="1.2.8"
+AFC_VERSION="1.2.9"
 
 # Class for holding different states so its clear what all valid states are
 class State(str, Enum):
@@ -1918,8 +1918,7 @@ class afc:
             tool_attempts = 0
             # A virtual tool_start sensor has no hardware to confirm against,
             # the distance move above is the whole load
-            if (cur_extruder.tool_start
-                and cur_extruder.tool_start != "virtual"):
+            if cur_extruder.has_toolhead_sensor:
                 while (not cur_lane.get_toolhead_pre_sensor_state()
                        or warn == AFCMoveWarning.WARN):
                     tool_attempts += 1

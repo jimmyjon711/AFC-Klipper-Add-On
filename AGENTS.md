@@ -1,12 +1,32 @@
 # Code Writing / Editing Rules
 
 - **Lines ≤100 characters** — break them up if they exceed that.
+- **Fill lines before wrapping** — when a statement doesn't fit on one line,
+   pack as much onto the first line as fits within the 100-character limit,
+   then wrap continuation lines aligned to the column right after the
+   opening parenthesis, not a generic 4-space hanging indent.
+
+   ```python
+   self.gcode.register_mux_command('AFC_ACE_DRY', "UNIT", self.name, self.cmd_AFC_ACE_DRY,
+                                   desc=self.cmd_AFC_ACE_DRY_help)
+   ```
+
+   Use judgment to break a line earlier than the limit when that's clearly
+   more readable (e.g. don't leave a single short token dangling alone after
+   a long filled line). Fall back to a plain hanging indent (current
+   indentation + 4 spaces) instead of full alignment when aligning to the
+   parenthesis would itself push a continuation line past 100 characters, or
+   would require splitting an atomic token (an f-string, a string literal)
+   that can't be broken without changing its content. This rule does not
+   apply to multi-condition boolean logic below, which always stays one
+   comparison per line even when it would fit filled onto one line.
 - **Multi-condition boolean logic**: one comparison per line; continuation
    lines start with the comparator (`and`/`or`, etc.), aligned with the
    content right after the opening parenthesis.
 
    ```python
-   if (self.enable and has_stepper
+   if (self.enable
+       and has_stepper
        and not getattr(self, "_correction_running", False)):
    ```
 - **Match existing formatting** as closely as possible — follow the
@@ -34,9 +54,11 @@
    error_str = f"Lane {self.name}: [filament_feed {self.feed_module}] not found"
    raise error(error_str)
    ```
-- **Keep comments short and succinct** — a sentence or two at most. Comments
-   still need to make sense to the developer reading them, just don't let
-   them turn into paragraphs.
+- **Keep comments short and succinct** — Keep comments succinct and to the point.
+   They should only be used when the code does not adequately explain itself.
+- **No decorative dashes on section-divider comments** — write `# Calibration
+   commands` rather than `# ── Calibration commands ──`. The label alone is
+   enough; drop the surrounding dashes/banner characters.
 - **No em-dashes.** Use a period, comma, or colon instead when breaking up a
    clause, in comments, docstrings, commit messages, or any other prose. This
    applies to new code and documentation, and to existing documentation while
@@ -85,6 +107,17 @@
    method names are already descriptive enough on their own
    (`test_success_after_one_retry_uses_resolved_lane_name`), so don't add
    one just to satisfy this rule.
+- **New files need a standard header** — any new `extras/*.py` (or similar
+   project source) file starts with this exact header before any other code,
+   docstring, or import:
+
+   ```python
+   # AFCProject Automated Filament Changer
+   #
+   # Copyright (C) 2026 AFCProject
+   #
+   # This file may be distributed under the terms of the GNU GPLv3 license.
+   ```
 - **All new code needs unit tests** — any code added must come with unit
    tests that follow the Unit Test Rules below.
 

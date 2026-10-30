@@ -21,7 +21,7 @@ import pytest
 from extras.AFC_utils import (
     add_filament_switch, check_and_return, section_in_config, DebounceButton,
     AFC_moonraker, VirtualRunoutHelper, VirtualFilamentSensor, AFC_PrintFileMetaData,
-    natural_sort_key,
+    natural_sort_key, PollingEndstopWrapper,
 )
 from tests.conftest import MockGCodeCommand
 
@@ -1653,3 +1653,217 @@ class TestVirtualFilamentSensor:
         gcmd = MockGCodeCommand(params={"ENABLE": 1})
         sensor.cmd_SET_FILAMENT_SENSOR(gcmd)
         assert sensor.runout_helper.sensor_enabled is True
+
+
+def _make_polling_endstop(trigger_value=False, poll_time=0.01):
+    """Build a PollingEndstopWrapper with a mock MCU and MockReactor."""
+    from tests.conftest import MockReactor
+    reactor = MockReactor()
+    mcu = MagicMock()
+    triggered = {"value": trigger_value}
+    endstop = PollingEndstopWrapper(reactor, lambda: mcu, lambda: triggered["value"],
+                                    poll_time=poll_time)
+    return endstop, reactor, mcu, triggered
+
+
+class TestPollingEndstopWrapperInit:
+    def test_initial_state(self):
+        endstop, reactor, mcu, triggered = _make_polling_endstop()
+        assert endstop._steppers == []
+        assert endstop._trigger_time == 0.
+        assert endstop._completion is None
+        assert endstop._poll_timer is None
+        assert endstop._reactor is reactor
+        assert endstop._poll_time == 0.01
+        assert endstop._home_triggered is True
+
+
+class TestPollingEndstopWrapperGetMcu:
+    def test_returns_mcu_from_callable(self):
+        endstop, reactor, mcu, triggered = _make_polling_endstop()
+        assert endstop.get_mcu() is mcu
+
+
+class TestPollingEndstopWrapperSteppers:
+    def test_add_stepper_appends(self):
+        endstop, reactor, mcu, triggered = _make_polling_endstop()
+        s1, s2 = MagicMock(), MagicMock()
+        endstop.add_stepper(s1)
+        endstop.add_stepper(s2)
+        assert endstop.get_steppers() == [s1, s2]
+
+    def test_add_stepper_is_idempotent(self):
+        endstop, reactor, mcu, triggered = _make_polling_endstop()
+        s1 = MagicMock()
+        endstop.add_stepper(s1)
+        endstop.add_stepper(s1)
+        assert endstop.get_steppers() == [s1]
+
+    def test_get_steppers_returns_a_copy(self):
+        endstop, reactor, mcu, triggered = _make_polling_endstop()
+        endstop.add_stepper(MagicMock())
+        result = endstop.get_steppers()
+        result.append(MagicMock())
+        assert len(endstop.get_steppers()) == 1
+
+
+class TestPollingEndstopWrapperForStepper:
+    def test_returns_a_new_wrapper_registered_under_given_name(self):
+        endstop, reactor, mcu, triggered = _make_polling_endstop()
+        query_endstops = MagicMock()
+
+        clone = endstop.for_stepper("lane1_tool_start", query_endstops)
+
+        assert clone is not endstop
+        assert isinstance(clone, PollingEndstopWrapper)
+        query_endstops.register_endstop.assert_called_once_with(clone, "lane1_tool_start")
+
+    def test_clone_shares_trigger_state_but_not_steppers(self):
+        """The clone must poll the exact same trigger_func/get_mcu/poll_time
+        as the source, but start with its own empty stepper list so adding a
+        stepper to one doesn't affect the other."""
+        endstop, reactor, mcu, triggered = _make_polling_endstop(poll_time=0.05)
+        source_stepper = MagicMock()
+        endstop.add_stepper(source_stepper)
+
+        clone = endstop.for_stepper("lane1_tool_start", MagicMock())
+        clone_stepper = MagicMock()
+        clone.add_stepper(clone_stepper)
+
+        assert clone.get_mcu() is mcu
+        assert clone._poll_time == 0.05
+        assert clone._trigger_func is endstop._trigger_func
+        assert clone.get_steppers() == [clone_stepper]
+        assert endstop.get_steppers() == [source_stepper]
+
+
+class TestPollingEndstopWrapperHomeStart:
+    def test_already_triggered_completes_immediately(self):
+        endstop, reactor, mcu, triggered = _make_polling_endstop(trigger_value=True)
+        mcu.estimated_print_time.return_value = 42.0
+        reactor.register_timer = MagicMock()
+
+        completion = endstop.home_start(0, 0, 0, 0, triggered=True)
+
+        assert endstop._trigger_time == 42.0
+        assert completion.result is True
+        reactor.register_timer.assert_not_called()
+
+    def test_not_triggered_starts_poll_timer(self):
+        endstop, reactor, mcu, triggered = _make_polling_endstop(trigger_value=False)
+        endstop._trigger_time = 999.0  # seed nonzero so the reset is proven
+        reactor.register_timer = MagicMock(return_value="timer1")
+
+        endstop.home_start(0, 0, 0, 0, triggered=True)
+
+        reactor.register_timer.assert_called_once_with(
+            endstop._poll_sensor, reactor.NOW)
+        assert endstop._poll_timer == "timer1"
+        assert endstop._trigger_time == 0.
+
+    def test_triggered_false_target_completes_when_untriggered(self):
+        """triggered=False means we're homing toward the *un*triggered state;
+        with the sensor currently untriggered, that condition is already met."""
+        endstop, reactor, mcu, triggered = _make_polling_endstop(trigger_value=False)
+        mcu.estimated_print_time.return_value = 10.0
+        reactor.register_timer = MagicMock()
+
+        completion = endstop.home_start(0, 0, 0, 0, triggered=False)
+
+        assert completion.result is True
+        reactor.register_timer.assert_not_called()
+
+    def test_triggered_false_target_starts_poll_timer_and_stores_target(self):
+        """With the sensor still triggered, homing toward untriggered must
+        poll (not complete immediately), and must remember that target so
+        _poll_sensor checks for untriggered rather than triggered."""
+        endstop, reactor, mcu, triggered = _make_polling_endstop(trigger_value=True)
+        reactor.register_timer = MagicMock(return_value="timer1")
+
+        endstop.home_start(0, 0, 0, 0, triggered=False)
+
+        reactor.register_timer.assert_called_once_with(
+            endstop._poll_sensor, reactor.NOW)
+        assert endstop._poll_timer == "timer1"
+        assert endstop._home_triggered is False
+
+
+class TestPollingEndstopWrapperPollSensor:
+    def test_triggered_completes_and_returns_never(self):
+        endstop, reactor, mcu, triggered = _make_polling_endstop(trigger_value=True)
+        endstop._completion = reactor.completion()
+        mcu.estimated_print_time.return_value = 7.5
+
+        result = endstop._poll_sensor(100.0)
+
+        assert result == reactor.NEVER
+        assert endstop._trigger_time == 7.5
+        assert endstop._completion.result is True
+
+    def test_not_triggered_reschedules(self):
+        endstop, reactor, mcu, triggered = _make_polling_endstop(
+            trigger_value=False, poll_time=0.01)
+        endstop._completion = reactor.completion()
+
+        result = endstop._poll_sensor(100.0)
+
+        assert result == 100.01
+        assert endstop._completion.result is None
+
+    def test_reverse_target_completes_once_untriggered(self):
+        """Covers _home_triggered=False: a reverse-homing poll (e.g. backing
+        off an endstop) must complete once the sensor goes untriggered, not
+        wait for it to go triggered."""
+        endstop, reactor, mcu, triggered = _make_polling_endstop(trigger_value=False)
+        endstop._completion = reactor.completion()
+        endstop._home_triggered = False
+        mcu.estimated_print_time.return_value = 9.0
+
+        result = endstop._poll_sensor(100.0)
+
+        assert result == reactor.NEVER
+        assert endstop._trigger_time == 9.0
+        assert endstop._completion.result is True
+
+    def test_reverse_target_reschedules_while_still_triggered(self):
+        endstop, reactor, mcu, triggered = _make_polling_endstop(
+            trigger_value=True, poll_time=0.01)
+        endstop._completion = reactor.completion()
+        endstop._home_triggered = False
+
+        result = endstop._poll_sensor(100.0)
+
+        assert result == 100.01
+        assert endstop._completion.result is None
+
+
+class TestPollingEndstopWrapperHomeWait:
+    def test_stops_poll_timer_when_active(self):
+        endstop, reactor, mcu, triggered = _make_polling_endstop()
+        endstop._poll_timer = "timer1"
+        endstop._trigger_time = 12.5
+        reactor.unregister_timer = MagicMock()
+
+        result = endstop.home_wait(0)
+
+        reactor.unregister_timer.assert_called_once_with("timer1")
+        assert endstop._poll_timer is None
+        assert result == 12.5
+
+    def test_noop_when_no_poll_timer(self):
+        endstop, reactor, mcu, triggered = _make_polling_endstop()
+        reactor.unregister_timer = MagicMock()
+
+        endstop.home_wait(0)
+
+        reactor.unregister_timer.assert_not_called()
+
+
+class TestPollingEndstopWrapperQueryEndstop:
+    def test_triggered_returns_one(self):
+        endstop, reactor, mcu, triggered = _make_polling_endstop(trigger_value=True)
+        assert endstop.query_endstop(0) == 1
+
+    def test_not_triggered_returns_zero(self):
+        endstop, reactor, mcu, triggered = _make_polling_endstop(trigger_value=False)
+        assert endstop.query_endstop(0) == 0
