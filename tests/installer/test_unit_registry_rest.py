@@ -9,6 +9,7 @@ from installer.unit_registry.registry import (
     additional_buffer_default,
     additional_buffer_options,
     additional_buffer_supported,
+    force_additional_buffer_default,
     unit_for,
 )
 from installer.unit_registry.selection import UnitSelection
@@ -19,6 +20,7 @@ from tests.installer.unit_rows import additional_rows, install_rows
 QUATTRO = "QuattroBox"
 OPENAMS = "OpenAMS"
 VIVID = "ViViD"
+ACE = "ACE"
 
 
 def make_ctx(tree: PrinterTree) -> Context:
@@ -222,6 +224,136 @@ class TestOpenAms:
             "unit settings.\n\n"
             "- Ensure OpenAMS is properly installed and configured per their instructions.\n  "
         )
+
+
+class TestAce:
+    def test_first_install_v1_copies_the_hardware_and_v1_files(
+        self, printer_tree: PrinterTree
+    ) -> None:
+        sel = UnitSelection(installation_type=ACE, ace_unit_type="V1")
+        ctx = install(printer_tree, sel, additional=False)
+        assert files(ctx) == ["AFC_ACE_1.cfg", "AFC_Hardware.cfg"]
+        assert (ctx.afc_config_dir / "AFC_ACE_1.cfg").read_bytes() == src(
+            printer_tree, "templates/AFC_ACE_1.cfg"
+        )
+
+    def test_first_install_v2_pro_copies_the_hardware_and_v2_pro_files(
+        self, printer_tree: PrinterTree
+    ) -> None:
+        sel = UnitSelection(installation_type=ACE, ace_unit_type="V2_Pro")
+        ctx = install(printer_tree, sel, additional=False)
+        assert files(ctx) == ["AFC_ACE2_1.cfg", "AFC_Hardware.cfg"]
+        assert (ctx.afc_config_dir / "AFC_ACE2_1.cfg").read_bytes() == src(
+            printer_tree, "templates/AFC_ACE2_1.cfg"
+        )
+
+    def test_additional_v1_unit_renames_ace_1(self, printer_tree: PrinterTree) -> None:
+        sel = UnitSelection(installation_type=ACE, ace_unit_type="V1", unit_name="Ace_2")
+        ctx = install(printer_tree, sel, additional=True)
+        assert files(ctx) == ["AFC_Ace_2.cfg"]
+        unit_text = text(ctx, "AFC_Ace_2.cfg")
+        assert "Ace_1" not in unit_text and "[AFC_ACE Ace_2]" in unit_text
+
+    def test_additional_v2_pro_unit_renames_ace2_1(self, printer_tree: PrinterTree) -> None:
+        sel = UnitSelection(installation_type=ACE, ace_unit_type="V2_Pro", unit_name="CustomName")
+        ctx = install(printer_tree, sel, additional=True)
+        assert files(ctx) == ["AFC_CustomName.cfg"]
+        unit_text = text(ctx, "AFC_CustomName.cfg")
+        assert "Ace2_1" not in unit_text and "[AFC_ACE2 CustomName]" in unit_text
+
+    def test_buffer_targets_match_the_actual_copied_file_names(
+        self, printer_tree: PrinterTree
+    ) -> None:
+        ctx = make_ctx(printer_tree)
+        unit = unit_for(ACE)
+        assert unit is not None
+        v1 = unit.buffer_target(ctx, UnitSelection(installation_type=ACE, ace_unit_type="V1"))
+        assert v1 == BufferTarget(
+            "Ace_1", "AFC_ACE", ctx.afc_config_dir / "AFC_ACE_1.cfg", "Ace_1"
+        )
+        v2 = unit.buffer_target(
+            ctx, UnitSelection(installation_type=ACE, ace_unit_type="V2_Pro")
+        )
+        assert v2 == BufferTarget(
+            "Ace2_1", "AFC_ACE2", ctx.afc_config_dir / "AFC_ACE2_1.cfg", "Ace2_1"
+        )
+        additional = unit.buffer_target(
+            ctx,
+            UnitSelection(
+                installation_type=ACE, ace_unit_type="V2_Pro", unit_name="Foo",
+                is_additional_unit=True,
+            ),
+        )
+        assert additional == BufferTarget(
+            "Foo", "AFC_ACE2", ctx.afc_config_dir / "AFC_Foo.cfg", "Foo"
+        )
+
+    def test_rows_and_message_differ_by_version(self, printer_tree: PrinterTree) -> None:
+        ctx = make_ctx(printer_tree)
+        unit = unit_for(ACE)
+        assert unit is not None
+        v1 = UnitSelection(installation_type=ACE, ace_unit_type="V1", unit_name="x")
+        v2 = UnitSelection(installation_type=ACE, ace_unit_type="V2_Pro", unit_name="x")
+        assert install_rows(unit, v1) == ["ACE Unit Type : V1"]
+        assert install_rows(unit, v2) == ["ACE Unit Type : V2_Pro"]
+        assert additional_rows(unit, ctx, v1) == [
+            "ACE Name : Ace_1", "ACE Unit Type : V1"
+        ]
+        assert additional_rows(unit, ctx, v2) == [
+            "ACE Name : Ace2_1", "ACE Unit Type : V2_Pro"
+        ]
+        assert "AFC_ACE2_rfid" in unit.message(ctx, v2)
+        assert "AFC_ACE2_rfid" not in unit.message(ctx, v1)
+
+    def test_on_select_forces_sensor_and_internal_buffer_and_fixes_the_name(self) -> None:
+        unit = unit_for(ACE)
+        assert unit is not None
+        sel = UnitSelection(
+            installation_type=ACE, ace_unit_type="V2_Pro",
+            toolhead_sensor="Ramming", buffer_type="Unknown", unit_name="Ace_1",
+        )
+        unit.on_select(sel)
+        assert sel.toolhead_sensor == "Sensor"
+        assert sel.buffer_type == "Internal"
+        assert sel.unit_name == "Ace2_1"
+
+    def test_cycle_buffer_order_wraps_without_returning_to_ramming(self) -> None:
+        unit = unit_for(ACE)
+        assert unit is not None
+        sel = UnitSelection(installation_type=ACE, buffer_type="Internal")
+        seen = [sel.buffer_type]
+        for _ in range(6):
+            unit.cycle_buffer(sel)
+            seen.append(sel.buffer_type)
+        assert seen == [
+            "Internal", "TurtleNeck", "TurtleNeckV2", "TurtleNeck2Remastered",
+            "FPS_PSF", "None", "Internal",
+        ]
+
+    def test_cycle_buffer_from_an_unknown_value_restarts_at_internal(self) -> None:
+        unit = unit_for(ACE)
+        assert unit is not None
+        sel = UnitSelection(installation_type=ACE, buffer_type="Unknown")
+        unit.cycle_buffer(sel)
+        assert sel.buffer_type == "Internal"
+
+    def test_name_prefix_follows_the_selected_version(self) -> None:
+        unit = unit_for(ACE)
+        assert unit is not None
+        assert unit.name_prefix(UnitSelection(ace_unit_type="V1")) == "Ace"
+        assert unit.name_prefix(UnitSelection(ace_unit_type="V2_Pro")) == "Ace2"
+
+    def test_additional_buffer_options_include_internal(self) -> None:
+        assert additional_buffer_supported(ACE) is True
+        assert additional_buffer_options(ACE) == (
+            "None", "Internal", "TurtleNeck", "TurtleNeckV2", "TurtleNeck2Remastered", "FPS_PSF"
+        )
+        assert additional_buffer_default(ACE) == "Internal"
+
+    def test_switching_in_always_forces_the_default_buffer(self) -> None:
+        # TurtleNeck is also a valid ACE option, so this only passes because ACE
+        # forces its own default rather than carrying a compatible buffer over.
+        assert force_additional_buffer_default(ACE) is True
 
 
 class TestVivid:

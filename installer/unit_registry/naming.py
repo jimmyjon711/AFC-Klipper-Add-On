@@ -30,7 +30,7 @@ _SECOND_NAME = "Turtle_2"
 
 def lowest_free_name(ctx: Context, sel: UnitSelection, unit: Optional[UnitType]) -> str:
     """
-    The default name for an additional unit: the lowest free ``<prefix>_N``.
+    The default name for an additional unit: the lowest free `<prefix>_N`.
 
     "Free" means no matching unit file exists yet in the AFC config directory.
 
@@ -39,7 +39,7 @@ def lowest_free_name(ctx: Context, sel: UnitSelection, unit: Optional[UnitType])
     :param unit: the unit type, or None for an unknown type
     :return str: the name
     """
-    prefix = unit.additional_name_prefix if unit is not None else "Unit"
+    prefix = unit.name_prefix(sel) if unit is not None else "Unit"
     number = 1
     while True:
         if unit is not None:
