@@ -201,7 +201,7 @@ def iter_cases():
         {
             "installation_type": "ACE",
             "ace_unit_type": "V1",
-            "seed_files": "AFC_Ace_1.cfg",
+            "seed_files": "AFC_ACE_1.cfg",
         },
     )
     yield (
@@ -210,7 +210,7 @@ def iter_cases():
         {
             "installation_type": "ACE",
             "ace_unit_type": "V2_Pro",
-            "seed_files": "AFC_Ace2_1.cfg",
+            "seed_files": "AFC_ACE2_1.cfg",
         },
     )
     yield (
@@ -219,7 +219,7 @@ def iter_cases():
         {
             "installation_type": "ACE",
             "ace_unit_type": "V2_Pro",
-            "seed_files": "AFC_Ace_1.cfg",
+            "seed_files": "AFC_ACE_1.cfg",
         },
     )
 

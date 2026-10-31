@@ -5,6 +5,7 @@ import pytest
 
 from installer.platform_core.context import Context
 from installer.unit_registry.base import BufferTarget
+from installer.unit_registry.naming import lowest_free_name
 from installer.unit_registry.registry import (
     additional_buffer_default,
     additional_buffer_options,
@@ -408,6 +409,21 @@ class TestAce:
         assert unit is not None
         assert unit.name_prefix(UnitSelection(ace_unit_type="V1")) == "Ace"
         assert unit.name_prefix(UnitSelection(ace_unit_type="V2_Pro")) == "Ace2"
+
+    def test_additional_probe_file_matches_the_upper_cased_default_file(self) -> None:
+        unit = unit_for(ACE)
+        assert unit is not None
+        sel = UnitSelection(installation_type=ACE)
+        assert unit.additional_probe_file("Ace", 1, sel) == "AFC_ACE_1.cfg"
+        assert unit.additional_probe_file("Ace2", 3, sel) == "AFC_ACE2_3.cfg"
+
+    def test_lowest_free_name_skips_an_already_installed_default(
+        self, printer_tree: PrinterTree
+    ) -> None:
+        sel = UnitSelection(installation_type=ACE, ace_unit_type="V1")
+        ctx = install(printer_tree, sel, additional=False)
+        assert (ctx.afc_config_dir / "AFC_ACE_1.cfg").is_file()
+        assert lowest_free_name(ctx, sel, unit_for(ACE)) == "Ace_2"
 
     def test_additional_buffer_options_include_internal(self) -> None:
         assert additional_buffer_supported(ACE) is True

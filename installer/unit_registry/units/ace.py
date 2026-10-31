@@ -167,6 +167,20 @@ class Ace(UnitType):
             ChoiceOption("ACE Unit Type", "ace_unit_type", ACE_UNIT_TYPES),
         ]
 
+    def additional_probe_file(self, prefix: str, number: int, sel: UnitSelection) -> str:
+        """
+        File name whose existence means the default `<prefix>_<number>` is taken.
+
+        Matches the all-caps file an unrenamed default gets (see `_additional_file_stem`),
+        so an already-installed default isn't offered again.
+
+        :param prefix: name prefix, e.g. `Ace2`
+        :param number: candidate number
+        :param sel: the user's unit choices
+        :return str: file name inside the AFC config directory
+        """
+        return f"AFC_{prefix.upper()}_{number}.cfg"
+
     def name_prefix(self, sel: UnitSelection) -> str:
         """
         `Ace2` for an ACE 2 Pro, `Ace` for a V1, instead of a single static prefix.
