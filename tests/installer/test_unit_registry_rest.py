@@ -226,6 +226,30 @@ class TestOpenAms:
         )
 
 
+class TestAceAdditionalFileStem:
+    def test_unrenamed_default_name_is_upper_cased(self) -> None:
+        unit = unit_for(ACE)
+        assert unit is not None
+        v1 = UnitSelection(installation_type=ACE, ace_unit_type="V1", turtle_renamed=False)
+        assert unit._additional_file_stem(v1, "Ace_1") == "ACE_1"
+        v2 = UnitSelection(installation_type=ACE, ace_unit_type="V2_Pro", turtle_renamed=False)
+        assert unit._additional_file_stem(v2, "Ace2_1") == "ACE2_1"
+
+    def test_renamed_name_is_left_exactly_as_chosen_even_if_it_looks_like_a_default(
+        self,
+    ) -> None:
+        unit = unit_for(ACE)
+        assert unit is not None
+        sel = UnitSelection(installation_type=ACE, ace_unit_type="V1", turtle_renamed=True)
+        assert unit._additional_file_stem(sel, "Ace_2") == "Ace_2"
+
+    def test_unrenamed_name_not_matching_the_prefix_is_left_unchanged(self) -> None:
+        unit = unit_for(ACE)
+        assert unit is not None
+        sel = UnitSelection(installation_type=ACE, ace_unit_type="V2_Pro", turtle_renamed=False)
+        assert unit._additional_file_stem(sel, "CustomName2") == "CustomName2"
+
+
 class TestAce:
     def test_first_install_v1_copies_the_hardware_and_v1_files(
         self, printer_tree: PrinterTree
@@ -247,19 +271,41 @@ class TestAce:
             printer_tree, "templates/AFC_ACE2_1.cfg"
         )
 
-    def test_additional_v1_unit_renames_ace_1(self, printer_tree: PrinterTree) -> None:
-        sel = UnitSelection(installation_type=ACE, ace_unit_type="V1", unit_name="Ace_2")
+    def test_additional_v1_renamed_unit_keeps_its_exact_chosen_name_and_file(
+        self, printer_tree: PrinterTree
+    ) -> None:
+        sel = UnitSelection(
+            installation_type=ACE, ace_unit_type="V1", unit_name="Ace_2", turtle_renamed=True
+        )
         ctx = install(printer_tree, sel, additional=True)
         assert files(ctx) == ["AFC_Ace_2.cfg"]
         unit_text = text(ctx, "AFC_Ace_2.cfg")
         assert "Ace_1" not in unit_text and "[AFC_ACE Ace_2]" in unit_text
 
-    def test_additional_v2_pro_unit_renames_ace2_1(self, printer_tree: PrinterTree) -> None:
-        sel = UnitSelection(installation_type=ACE, ace_unit_type="V2_Pro", unit_name="CustomName")
+    def test_additional_v2_pro_renamed_unit_keeps_its_exact_chosen_name_and_file(
+        self, printer_tree: PrinterTree
+    ) -> None:
+        sel = UnitSelection(
+            installation_type=ACE, ace_unit_type="V2_Pro", unit_name="CustomName",
+            turtle_renamed=True,
+        )
         ctx = install(printer_tree, sel, additional=True)
         assert files(ctx) == ["AFC_CustomName.cfg"]
         unit_text = text(ctx, "AFC_CustomName.cfg")
         assert "Ace2_1" not in unit_text and "[AFC_ACE2 CustomName]" in unit_text
+
+    def test_additional_v2_pro_unrenamed_default_gets_an_uppercase_file_but_mixed_case_content(
+        self, printer_tree: PrinterTree
+    ) -> None:
+        sel = UnitSelection(
+            installation_type=ACE, ace_unit_type="V2_Pro", unit_name="Ace2_1",
+            turtle_renamed=False,
+        )
+        ctx = install(printer_tree, sel, additional=True)
+        assert files(ctx) == ["AFC_ACE2_1.cfg"]
+        unit_text = text(ctx, "AFC_ACE2_1.cfg")
+        assert "[AFC_ACE2 Ace2_1]" in unit_text
+        assert "ACE2_1" not in unit_text
 
     def test_buffer_targets_match_the_actual_copied_file_names(
         self, printer_tree: PrinterTree
@@ -281,11 +327,31 @@ class TestAce:
             ctx,
             UnitSelection(
                 installation_type=ACE, ace_unit_type="V2_Pro", unit_name="Foo",
-                is_additional_unit=True,
+                is_additional_unit=True, turtle_renamed=False,
             ),
         )
         assert additional == BufferTarget(
             "Foo", "AFC_ACE2", ctx.afc_config_dir / "AFC_Foo.cfg", "Foo"
+        )
+        additional_unrenamed_default = unit.buffer_target(
+            ctx,
+            UnitSelection(
+                installation_type=ACE, ace_unit_type="V2_Pro", unit_name="Ace2_2",
+                is_additional_unit=True, turtle_renamed=False,
+            ),
+        )
+        assert additional_unrenamed_default == BufferTarget(
+            "Ace2_2", "AFC_ACE2", ctx.afc_config_dir / "AFC_ACE2_2.cfg", "Ace2_2"
+        )
+        additional_renamed_to_a_default_looking_name = unit.buffer_target(
+            ctx,
+            UnitSelection(
+                installation_type=ACE, ace_unit_type="V2_Pro", unit_name="Ace2_3",
+                is_additional_unit=True, turtle_renamed=True,
+            ),
+        )
+        assert additional_renamed_to_a_default_looking_name == BufferTarget(
+            "Ace2_3", "AFC_ACE2", ctx.afc_config_dir / "AFC_Ace2_3.cfg", "Ace2_3"
         )
 
     def test_rows_and_message_differ_by_version(self, printer_tree: PrinterTree) -> None:

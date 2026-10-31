@@ -1,12 +1,11 @@
 === FILES ===
---- AFC_Ace_1.cfg ---
+--- AFC_ACE_1.cfg ---
 # Anycubic ACE Pro (first generation, "V1")
 #
 # The ACE is not an MCU. Klipper talks to its firmware over the ACE's own
 # USB serial port and the ACE moves the filament itself, so there are no
 # pins or steppers in this file. Its lanes are plain [AFC_lane] sections,
-# not [AFC_stepper]. For an ACE 2 Pro use AFC_ACE2_1.cfg instead; the two
-# speak different serial protocols.
+# not [AFC_stepper].
 #
 # Before the first boot:
 #   1. Check serial_port and ace_index below.
@@ -161,7 +160,7 @@ max_temp: 70                # Klipper shuts down above this. Keep it above
 # The V1 reports no unique id per tag, so it does not create or match
 # Spoolman spools: set one by hand with SET_SPOOL_ID LANE=lane0 SPOOL_ID=n.
 # [AFC_ACE2_rfid] is for the ACE 2 Pro only; do not add it for a V1.
-# AFC_ACE_RFID_DUMP UNIT=Ace_1 LANE=lane0 prints what the ACE read from a tag.--- end AFC_Ace_1.cfg ---
+# AFC_ACE_RFID_DUMP UNIT=Ace_1 LANE=lane0 prints what the ACE read from a tag.--- end AFC_ACE_1.cfg ---
 --- AFC_Turtle_1.cfg ---
 placeholder
 --- end AFC_Turtle_1.cfg ---

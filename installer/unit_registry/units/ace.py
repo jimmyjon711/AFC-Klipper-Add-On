@@ -61,11 +61,32 @@ class Ace(UnitType):
         template_name = "AFC_ACE2_1.cfg" if sel.ace_unit_type == "V2_Pro" else "AFC_ACE_1.cfg"
         safe_copy(ctx, console, prompter, templates / template_name, cfg / template_name)
 
+    def _additional_file_stem(self, sel: UnitSelection, name: str) -> str:
+        """
+        The file name for an additional unit currently named `name`.
+
+        Still on the untouched default (`sel.turtle_renamed` is False), the brand prefix is
+        upper-cased for the file, matching the first unit's `AFC_ACE_1.cfg`; a name the user
+        chose is used exactly as typed.
+
+        :param sel: the user's unit choices
+        :param name: the unit's current name
+        :return str: the file name stem (without `AFC_` or `.cfg`)
+        """
+        prefix = self.name_prefix(sel)
+        if (not sel.turtle_renamed
+            and name.startswith(prefix)):
+            return prefix.upper() + name[len(prefix):]
+        return name
+
     def install_additional(
         self, ctx: Context, console: Console, prompter: Prompter, sel: UnitSelection
     ) -> None:
         """
         Copy the unit file under its new name and rename the default unit name inside it.
+
+        The unit name inside the file (section names, `unit:` references) is always exactly
+        the chosen name, e.g. `Ace2_1`; see `_additional_file_stem` for the file's own name.
 
         :param ctx: installer context
         :param console: where messages go
@@ -74,7 +95,7 @@ class Ace(UnitType):
         """
         cfg = ctx.afc_config_dir
         name = sel.unit_name
-        unit_file = cfg / f"AFC_{name}.cfg"
+        unit_file = cfg / f"AFC_{self._additional_file_stem(sel, name)}.cfg"
         if sel.ace_unit_type == "V2_Pro":
             template = ctx.afc_path / "templates" / "AFC_ACE2_1.cfg"
             safe_copy(ctx, console, prompter, template, unit_file)
@@ -98,8 +119,9 @@ class Ace(UnitType):
             section_prefix, default_name, unit_file = "AFC_ACE", "Ace_1", "AFC_ACE_1.cfg"
         if sel.is_additional_unit:
             name = sel.unit_name
+            file_stem = self._additional_file_stem(sel, name)
             return BufferTarget(
-                name, section_prefix, ctx.afc_config_dir / f"AFC_{name}.cfg", name
+                name, section_prefix, ctx.afc_config_dir / f"AFC_{file_stem}.cfg", name
             )
         return BufferTarget(
             default_name, section_prefix, ctx.afc_config_dir / unit_file, default_name
@@ -171,10 +193,10 @@ class Ace(UnitType):
         """
         Step to the next buffer type: `Internal`, then the mechanical options, then `None`.
 
-        Ramming is never active for ACE, so unlike the generic cycle, ``FPS_PSF`` falls
-        back to ``None`` rather than back to ``TurtleNeck``.
+        Ramming is never active for ACE, so unlike the generic cycle, `FPS_PSF` falls
+        back to `None` rather than back to `TurtleNeck`.
 
-        :param sel: the user's unit choices, ``buffer_type`` is updated
+        :param sel: the user's unit choices, `buffer_type` is updated
         """
         if sel.buffer_type in _BUFFER_ORDER:
             position = (_BUFFER_ORDER.index(sel.buffer_type) + 1) % len(_BUFFER_ORDER)
