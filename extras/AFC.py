@@ -2183,7 +2183,9 @@ class afc:
 
             self.logger.debug(f"Next lane load:{self.next_lane_load}, lanes:{cur_extruder.lanes}, current lane:{cur_lane}, unload_toolhead:{unload_toolhead}")
 
-        if self.current is not None and unload_toolhead:
+        if (self.current is not None
+            and unload_toolhead
+            and cur_lane is not None):
             self.current_state  = State.UNLOADING
             self.current_loading = cur_lane.name
             self.logger.info("Unloading {}".format(cur_lane.name))
@@ -2670,6 +2672,11 @@ class afc:
                 self.save_pos()
                 # Set the in_toolchange flag to prevent overwriting the saved position during potential failures.
                 self.in_toolchange = True
+
+                # Defaults so the adjusting_temperature block below can safely check these
+                # even when prep hasn't completed and the block below never assigns them.
+                current_lane_name: Optional[str] = None
+                unload_lane: Optional[AFCLane] = None
 
                 # Check if the lane has completed the preparation process required for tool changes.
                 if cur_lane._afc_prep_done:
