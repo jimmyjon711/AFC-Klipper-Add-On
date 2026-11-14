@@ -307,6 +307,8 @@ class afcPrep:
                     and lane.tool_loaded):
                     self.afc.spool.set_snapmaker_filament_params(lane)
 
+            self.afc.spool.sync_extruder_map_table()
+
         # Verifying that user has macro positions set correctly for enabled park, cut, etc macros
         error_str = self.afc.verify_macro_positions()
         if error_str:

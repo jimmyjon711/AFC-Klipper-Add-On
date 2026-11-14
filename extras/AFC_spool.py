@@ -157,6 +157,105 @@ class AFCSpool:
                 self.logger.error("Error when trying to update colors for snapmaker print_task_config")
                 self.logger.debug(traceback.format_exc())
 
+    def sync_extruder_map_table(self) -> None:
+        """
+        This method is only for snapmaker printers, pushes AFC's current T(n) -> lane
+        -> physical extruder mapping into snapmaker's print_task_config
+        extruder_map_table. Needed so the printer's own power-loss-resume logic
+        targets the same toolhead AFC would use for each T(n), instead of a stale
+        mapping left over from before a SET_MAP change or a fresh PREP.
+
+        Logic is based off this file in u1-klipper repo:
+            https://github.com/Snapmaker/u1-klipper/blob/main/klippy/extras/print_task_config.py
+        """
+        if (not self.afc.snapmaker_printer
+            or self.print_task_config_obj is None):
+            return
+        try:
+            from extras.print_task_config import DEFAULT_PRINT_TASK_CONFIG
+            tmp_config = copy.deepcopy(self.print_task_config_obj.print_task_config)
+            extruder_map_table = tmp_config['extruder_map_table']
+
+            for map_cmd, lane_name in self.afc.tool_cmds.items():
+                try:
+                    logical_index = int(map_cmd.lstrip("T"))
+                except ValueError:
+                    continue
+                if logical_index >= len(extruder_map_table):
+                    continue
+                lane_obj = self.afc.lanes.get(lane_name)
+                if lane_obj is None:
+                    continue
+                extruder_map_table[logical_index] = lane_obj.lane_extruder_index
+
+            tmp_config['extruder_map_table'] = extruder_map_table
+            self.print_task_config_obj.print_task_config = tmp_config
+            self.printer.update_snapmaker_config_file(self.print_task_config_obj.config_path,
+                                                      self.print_task_config_obj.print_task_config,
+                                                      DEFAULT_PRINT_TASK_CONFIG)
+        except Exception:
+            self.logger.error(
+                "Error when trying to update extruder_map_table for snapmaker print_task_config")
+            self.logger.debug(traceback.format_exc())
+
+    def resync_afc_mapping_from_extruder_map_table(self) -> None:
+        """
+        This method is only for snapmaker printers, called when a print starts.
+        Compares snapmaker's live print_task_config extruder_map_table against AFC's
+        current T(n) mapping; a mismatch means the mapping was changed from the
+        printer's screen (which writes directly to print_task_config, bypassing AFC's
+        SET_MAP), so AFC adopts that change instead of printing with a stale mapping.
+        """
+        if (not self.afc.snapmaker_printer
+            or self.print_task_config_obj is None):
+            return
+        try:
+            # Snapshot so a `_set_map` call triggered below (which replaces
+            # print_task_config's own table via sync_extruder_map_table) can't change
+            # what later iterations of this same loop compare against.
+            live_table = self.print_task_config_obj.print_task_config['extruder_map_table']
+            extruder_map_table = list(live_table)
+
+            for map_cmd, lane_name in list(self.afc.tool_cmds.items()):
+                try:
+                    logical_index = int(map_cmd.lstrip("T"))
+                except ValueError:
+                    continue
+                if logical_index >= len(extruder_map_table):
+                    continue
+
+                cur_lane = self.afc.lanes.get(lane_name)
+                if cur_lane is None:
+                    continue
+
+                screen_extruder_index = extruder_map_table[logical_index]
+                if cur_lane.lane_extruder_index == screen_extruder_index:
+                    continue
+
+                th_extruder_name = ("extruder" if screen_extruder_index == 0
+                                    else f"extruder{screen_extruder_index}")
+                target_extruder = self.afc.tools.get(th_extruder_name)
+                if (target_extruder is None
+                    or target_extruder.lane_loaded is None):
+                    continue
+
+                new_lane = self.afc.lanes.get(target_extruder.lane_loaded)
+                if (new_lane is None
+                    or new_lane is cur_lane):
+                    continue
+
+                self.logger.info(
+                    f"{map_cmd} mapping was changed from the printer's screen: was "
+                    f"{cur_lane.name} (extruder {cur_lane.lane_extruder_index}), now "
+                    f"{new_lane.name} (extruder {screen_extruder_index}). Updating "
+                    "AFC's mapping to match."
+                )
+                self._set_map(new_lane, cur_lane, map_cmd)
+        except Exception:
+            self.logger.error(
+                "Error when trying to resync AFC mapping from snapmaker print_task_config")
+            self.logger.debug(traceback.format_exc())
+
     cmd_AFC_SET_SPOOL_TEMP_help = "Set spool temperatures for a lane"
     def cmd_AFC_SET_SPOOL_TEMP(self, gcmd: GCodeCommand) -> None:
         """
@@ -225,6 +324,18 @@ class AFCSpool:
             self.logger.info(f"{map_cmd} is already mapped to {lane}")
             return
 
+        self._set_map(cur_lane, sw_lane, map_cmd)
+
+    def _set_map(self, cur_lane: AFCLane, sw_lane: AFCLane, map_cmd: str) -> None:
+        """
+        Core logic swapping `map_cmd`'s mapping from `sw_lane` to `cur_lane`. Shared
+        by `cmd_SET_MAP` and the extruder_map_table resync done at print start.
+
+        :param cur_lane: Lane to assign `map_cmd` to
+        :param sw_lane: Lane that currently holds `map_cmd`, which receives
+                        `cur_lane`'s previous mapping in exchange
+        :param map_cmd: T(n) command being reassigned
+        """
         if self.enable_multiple_mapping:
             sw_lane.map = [c for c in sw_lane.map if c != map_cmd]
             if sw_lane.current_map == map_cmd:
@@ -254,6 +365,7 @@ class AFCSpool:
         cur_lane.send_lane_data()
 
         self.afc.save_vars()
+        self.sync_extruder_map_table()
 
     cmd_AFC_SWAP_MAPPING_help = "Swaps mapping between two lanes as provided with the FROM/TO variables"
     def cmd_AFC_SWAP_MAPPING(self, gcmd: GCodeCommand) -> None:
