@@ -349,6 +349,266 @@ class TestSetMap:
         assert lane1.map == ["T0"]
 
 
+# ── _set_map ──────────────────────────────────────────────────────────────────
+
+class TestSetMapCore:
+    """Direct coverage of _set_map, independent of the cmd_SET_MAP entry point
+    (fully exercised above) and the extruder_map_table resync call site below."""
+
+    def test_swaps_mapping_between_lanes(self):
+        spool = _make_spool()
+        spool.afc.snapmaker_printer = False
+        lane1 = _make_lane("lane1")
+        lane1.map = ["T1"]
+        lane2 = _make_lane("lane2")
+        lane2.map = ["T0"]
+        lane2.current_map = "T0"
+        spool.afc.tool_cmds = {"T0": "lane2"}
+        spool.afc.lanes = {"lane1": lane1, "lane2": lane2}
+        spool._set_map(lane1, lane2, "T0")
+        assert lane1.current_map == "T0"
+        assert spool.afc.tool_cmds["T0"] == "lane1"
+        assert lane2.map == ["T1"]
+
+    def test_calls_sync_extruder_map_table(self):
+        spool = _make_spool()
+        lane1 = _make_lane("lane1")
+        lane1.map = ["T1"]
+        lane2 = _make_lane("lane2")
+        lane2.map = ["T0"]
+        spool.afc.tool_cmds = {"T0": "lane2"}
+        spool.afc.lanes = {"lane1": lane1, "lane2": lane2}
+        spool.sync_extruder_map_table = MagicMock()
+        spool._set_map(lane1, lane2, "T0")
+        spool.sync_extruder_map_table.assert_called_once()
+
+
+# ── sync_extruder_map_table ──────────────────────────────────────────────────
+
+class TestSyncExtruderMapTable:
+    def _make(self):
+        from tests.conftest import _make_print_task_config
+        import sys
+        sys.modules.setdefault("extras.print_task_config", _make_print_task_config())
+
+        spool = _make_spool()
+        spool.afc.snapmaker_printer = True
+        spool.print_task_config_obj = MagicMock()
+        spool.print_task_config_obj.print_task_config = {"extruder_map_table": [0, 0, 0, 0]}
+        spool.print_task_config_obj.config_path = "fake_path"
+        spool.printer = MagicMock()
+        return spool
+
+    def test_not_snapmaker_printer_does_nothing(self):
+        spool = self._make()
+        spool.afc.snapmaker_printer = False
+        spool.sync_extruder_map_table()
+        spool.printer.update_snapmaker_config_file.assert_not_called()
+
+    def test_print_task_config_obj_none_does_nothing(self):
+        spool = self._make()
+        spool.print_task_config_obj = None
+        spool.sync_extruder_map_table()
+        spool.printer.update_snapmaker_config_file.assert_not_called()
+
+    def test_updates_table_from_tool_cmds(self):
+        spool = self._make()
+        lane = _make_lane("lane1", extruder_index=2)
+        spool.afc.lanes = {"lane1": lane}
+        spool.afc.tool_cmds = {"T1": "lane1"}
+        spool.sync_extruder_map_table()
+        assert spool.print_task_config_obj.print_task_config["extruder_map_table"][1] == 2
+        spool.printer.update_snapmaker_config_file.assert_called_once()
+
+    def test_skips_non_integer_t_suffix(self):
+        spool = self._make()
+        lane = _make_lane("lane1", extruder_index=3)
+        spool.afc.lanes = {"lane1": lane}
+        spool.afc.tool_cmds = {"TX": "lane1"}
+        spool.sync_extruder_map_table()
+        assert spool.print_task_config_obj.print_task_config["extruder_map_table"] == [0, 0, 0, 0]
+
+    def test_skips_logical_index_out_of_bounds(self):
+        spool = self._make()
+        lane = _make_lane("lane1", extruder_index=3)
+        spool.afc.lanes = {"lane1": lane}
+        spool.afc.tool_cmds = {"T99": "lane1"}
+        spool.sync_extruder_map_table()
+        assert spool.print_task_config_obj.print_task_config["extruder_map_table"] == [0, 0, 0, 0]
+
+    def test_skips_lane_not_in_lanes(self):
+        spool = self._make()
+        spool.afc.lanes = {}
+        spool.afc.tool_cmds = {"T0": "ghost"}
+        spool.sync_extruder_map_table()
+        assert spool.print_task_config_obj.print_task_config["extruder_map_table"] == [0, 0, 0, 0]
+
+    def test_exception_logs_error_and_debug(self):
+        spool = self._make()
+        spool.afc.lanes = {"lane1": _make_lane("lane1")}
+        spool.afc.tool_cmds = {"T0": "lane1"}
+        spool.printer.update_snapmaker_config_file.side_effect = RuntimeError("boom")
+        spool.sync_extruder_map_table()
+        assert spool.logger.messages[0] == (
+            "error", "Error when trying to update extruder_map_table for snapmaker print_task_config")
+        assert spool.logger.messages[1][0] == "debug"
+
+
+# ── resync_afc_mapping_from_extruder_map_table ───────────────────────────────
+
+class TestResyncAfcMappingFromExtruderMapTable:
+    def _make(self):
+        spool = _make_spool()
+        spool.afc.snapmaker_printer = True
+        spool.print_task_config_obj = MagicMock()
+        spool.print_task_config_obj.print_task_config = {"extruder_map_table": [0, 0, 0, 0]}
+        spool._set_map = MagicMock()
+        return spool
+
+    def test_not_snapmaker_printer_does_nothing(self):
+        spool = self._make()
+        spool.afc.snapmaker_printer = False
+        spool.afc.tool_cmds = {"T0": "lane1"}
+        spool.resync_afc_mapping_from_extruder_map_table()
+        spool._set_map.assert_not_called()
+
+    def test_print_task_config_obj_none_does_nothing(self):
+        spool = self._make()
+        spool.print_task_config_obj = None
+        spool.afc.tool_cmds = {"T0": "lane1"}
+        spool.resync_afc_mapping_from_extruder_map_table()
+        spool._set_map.assert_not_called()
+
+    def test_skips_non_integer_t_suffix(self):
+        spool = self._make()
+        spool.afc.tool_cmds = {"TX": "lane1"}
+        spool.resync_afc_mapping_from_extruder_map_table()
+        spool._set_map.assert_not_called()
+
+    def test_skips_logical_index_out_of_bounds(self):
+        spool = self._make()
+        spool.afc.tool_cmds = {"T99": "lane1"}
+        spool.resync_afc_mapping_from_extruder_map_table()
+        spool._set_map.assert_not_called()
+
+    def test_skips_lane_not_in_lanes(self):
+        spool = self._make()
+        spool.afc.lanes = {}
+        spool.afc.tool_cmds = {"T0": "ghost"}
+        spool.resync_afc_mapping_from_extruder_map_table()
+        spool._set_map.assert_not_called()
+
+    def test_skips_when_index_already_matches(self):
+        spool = self._make()
+        lane1 = _make_lane("lane1", extruder_index=0)
+        spool.afc.lanes = {"lane1": lane1}
+        spool.afc.tool_cmds = {"T0": "lane1"}
+        spool.print_task_config_obj.print_task_config["extruder_map_table"][0] = 0
+        spool.resync_afc_mapping_from_extruder_map_table()
+        spool._set_map.assert_not_called()
+
+    def test_skips_when_target_extruder_not_found(self):
+        spool = self._make()
+        lane1 = _make_lane("lane1", extruder_index=0)
+        spool.afc.lanes = {"lane1": lane1}
+        spool.afc.tools = {}
+        spool.afc.tool_cmds = {"T0": "lane1"}
+        spool.print_task_config_obj.print_task_config["extruder_map_table"][0] = 1
+        spool.resync_afc_mapping_from_extruder_map_table()
+        spool._set_map.assert_not_called()
+
+    def test_skips_when_target_extruder_has_no_lane_loaded(self):
+        spool = self._make()
+        lane1 = _make_lane("lane1", extruder_index=0)
+        target_extruder = MagicMock()
+        target_extruder.lane_loaded = None
+        spool.afc.lanes = {"lane1": lane1}
+        spool.afc.tools = {"extruder1": target_extruder}
+        spool.afc.tool_cmds = {"T0": "lane1"}
+        spool.print_task_config_obj.print_task_config["extruder_map_table"][0] = 1
+        spool.resync_afc_mapping_from_extruder_map_table()
+        spool._set_map.assert_not_called()
+
+    def test_skips_when_loaded_lane_not_found(self):
+        spool = self._make()
+        lane1 = _make_lane("lane1", extruder_index=0)
+        target_extruder = MagicMock()
+        target_extruder.lane_loaded = "ghost"
+        spool.afc.lanes = {"lane1": lane1}
+        spool.afc.tools = {"extruder1": target_extruder}
+        spool.afc.tool_cmds = {"T0": "lane1"}
+        spool.print_task_config_obj.print_task_config["extruder_map_table"][0] = 1
+        spool.resync_afc_mapping_from_extruder_map_table()
+        spool._set_map.assert_not_called()
+
+    def test_skips_when_new_lane_is_cur_lane(self):
+        """Defensive guard: if the resolved new_lane is the same object as
+        cur_lane despite the index mismatch, no swap is attempted."""
+        spool = self._make()
+        lane1 = _make_lane("lane1", extruder_index=0)
+        target_extruder = MagicMock()
+        target_extruder.lane_loaded = "lane1"
+        spool.afc.lanes = {"lane1": lane1}
+        spool.afc.tools = {"extruder1": target_extruder}
+        spool.afc.tool_cmds = {"T0": "lane1"}
+        spool.print_task_config_obj.print_task_config["extruder_map_table"][0] = 1
+        spool.resync_afc_mapping_from_extruder_map_table()
+        spool._set_map.assert_not_called()
+
+    def test_calls_set_map_with_new_lane_when_extruder_0(self):
+        spool = self._make()
+        lane1 = _make_lane("lane1", extruder_index=1)
+        lane_new = _make_lane("lane_new", extruder_index=0)
+        target_extruder = MagicMock()
+        target_extruder.lane_loaded = "lane_new"
+        spool.afc.lanes = {"lane1": lane1, "lane_new": lane_new}
+        spool.afc.tools = {"extruder": target_extruder}
+        spool.afc.tool_cmds = {"T0": "lane1"}
+        spool.print_task_config_obj.print_task_config["extruder_map_table"][0] = 0
+        spool.resync_afc_mapping_from_extruder_map_table()
+        spool._set_map.assert_called_once_with(lane_new, lane1, "T0")
+
+    def test_calls_set_map_with_new_lane_when_extruder_nonzero(self):
+        spool = self._make()
+        lane1 = _make_lane("lane1", extruder_index=0)
+        lane_new = _make_lane("lane_new", extruder_index=2)
+        target_extruder = MagicMock()
+        target_extruder.lane_loaded = "lane_new"
+        spool.afc.lanes = {"lane1": lane1, "lane_new": lane_new}
+        spool.afc.tools = {"extruder2": target_extruder}
+        spool.afc.tool_cmds = {"T0": "lane1"}
+        spool.print_task_config_obj.print_task_config["extruder_map_table"][0] = 2
+        spool.resync_afc_mapping_from_extruder_map_table()
+        spool._set_map.assert_called_once_with(lane_new, lane1, "T0")
+
+    def test_logs_info_message_describing_the_change(self):
+        spool = self._make()
+        lane1 = _make_lane("lane1", extruder_index=0)
+        lane_new = _make_lane("lane_new", extruder_index=2)
+        target_extruder = MagicMock()
+        target_extruder.lane_loaded = "lane_new"
+        spool.afc.lanes = {"lane1": lane1, "lane_new": lane_new}
+        spool.afc.tools = {"extruder2": target_extruder}
+        spool.afc.tool_cmds = {"T0": "lane1"}
+        spool.print_task_config_obj.print_task_config["extruder_map_table"][0] = 2
+        spool.resync_afc_mapping_from_extruder_map_table()
+        assert spool.logger.messages == [(
+            "info",
+            "T0 mapping was changed from the printer's screen: was lane1 "
+            "(extruder 0), now lane_new (extruder 2). Updating AFC's mapping to match."
+        )]
+
+    def test_exception_logs_error_and_debug(self):
+        spool = self._make()
+        spool.afc.lanes = MagicMock()
+        spool.afc.lanes.get.side_effect = RuntimeError("boom")
+        spool.afc.tool_cmds = {"T0": "lane1"}
+        spool.resync_afc_mapping_from_extruder_map_table()
+        assert spool.logger.messages[0] == (
+            "error", "Error when trying to resync AFC mapping from snapmaker print_task_config")
+        assert spool.logger.messages[1][0] == "debug"
+
+
 # ── cmd_AFC_SWAP_MAPPING ────────────────────────────────────────────────────────
 
 class TestAfcSwapMapping:

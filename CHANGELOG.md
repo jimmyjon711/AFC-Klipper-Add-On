@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Updated
 - Updated the way `run_script_by_command` was being called to work correctly with Kalico's PR 1052 changes and also work correctly with older Klipper versions.
 
+## [11-13-2026]
+### Fixed
+- Fixed Snapmaker U1/Snorca power-loss-resume potentially targeting the wrong
+  toolhead or temperature after the lane mapping was changed from the printer's
+  screen mid-print. AFC now pushes its T(n) mapping into snapmaker's
+  print_task_config `extruder_map_table` during PREP and whenever `SET_MAP` runs,
+  and resyncs AFC's own mapping from that table at the start of every print. (#824)
+
 ## [11-09-2026]
 ### Fixed
 - fix Cut.cfg macro to honor the safe_move_first when heading to safe park location

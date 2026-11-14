@@ -171,7 +171,7 @@ class TestTd1Prep:
 
 
 class TestPrepRestoreFilamentInfo:
-    def _run_prep(self, lane_vars, spoolman=None, tmp_path=None):
+    def _run_prep(self, lane_vars, spoolman=None, tmp_path=None, snapmaker_printer=False):
         from tests.conftest import MockConfig, MockPrinter, MockAFC
 
         afc = MockAFC()
@@ -189,7 +189,7 @@ class TestPrepRestoreFilamentInfo:
         afc.spoolman = spoolman
         afc.tools = {}
         afc.buffers = {}
-        afc.snapmaker_printer = False
+        afc.snapmaker_printer = snapmaker_printer
         afc.current = "lane1"
         afc.bypass = MagicMock()
         afc.bypass.name = "bypass"
@@ -261,3 +261,19 @@ class TestPrepRestoreFilamentInfo:
         afc.spool.set_spoolID.assert_not_called()
         assert lane.spool_vendor == "Elegoo"
         assert lane.filament_name == "PLA"
+
+
+class TestPrepSyncsExtruderMapTable:
+    """GH #824: PREP must push AFC's mapping into snapmaker's print_task_config
+    so the live extruder_map_table doesn't drift from AFC's own mapping."""
+
+    def _run_prep(self, *args, **kwargs):
+        return TestPrepRestoreFilamentInfo()._run_prep(*args, **kwargs)
+
+    def test_syncs_when_snapmaker_printer(self, tmp_path):
+        _, afc = self._run_prep({}, tmp_path=tmp_path, snapmaker_printer=True)
+        afc.spool.sync_extruder_map_table.assert_called_once()
+
+    def test_does_not_sync_when_not_snapmaker_printer(self, tmp_path):
+        _, afc = self._run_prep({}, tmp_path=tmp_path, snapmaker_printer=False)
+        afc.spool.sync_extruder_map_table.assert_not_called()
