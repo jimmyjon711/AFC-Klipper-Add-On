@@ -17,17 +17,25 @@ from configfile import error
 try: from extras.AFC_utils import natural_sort_key
 except: raise error("Error when trying to import AFC_utils.natural_sort_key\n{trace}".format(trace=traceback.format_exc()))
 
+try: from extras.AFC_respond import AFCprompt
+except: raise error("Error when trying to import AFC_respond.AFCprompt\n{trace}".format(trace=traceback.format_exc()))
+
 if TYPE_CHECKING:
     from gcode import GCodeCommand
     from extras.AFC_utils import AFCGcmd
     from configfile import ConfigWrapper
     from extras.AFC import afc
     from extras.AFC_lane import AFCLane
+    from extras.AFC_extruder import AFCExtruder
 
 # Above this many lanes remapped from the printer's screen at once, the mapping is more likely
 # stale or unrelated to a different print_task_config than a deliberate remap, so AFC cancels
 # the print instead of adopting it.
 MAX_UNATTENDED_MAPPING_CHANGES = 4
+
+def _format_color_hex(value: str) -> str:
+    """Normalize a stored RRGGBB or RRGGBBAA hex string to display form "#RRGGBB"."""
+    return f"#{value.lstrip('#')[:6].upper()}"
 
 class AFCSpool:
     def __init__(self, config: ConfigWrapper) -> None:
@@ -42,6 +50,10 @@ class AFCSpool:
         self.SPOOLMAN_REMOTE_METHOD = 'spoolman_set_active_spool'
         self.print_task_config_obj = None
 
+        # T(n) -> (lane currently holding it) still waiting on a user pick from
+        # _show_next_lane_mapping_prompt, see resync_afc_mapping_from_extruder_map_table.
+        self._pending_lane_mapping_prompts: dict[str, AFCLane] = {}
+        self._pending_lane_mapping_colors: dict[str, Optional[str]] = {}
 
         # Temporary status variables
         self.next_spool_id: Optional[int] = None
@@ -85,6 +97,7 @@ class AFCSpool:
         self.print_task_config_obj = self.printer.lookup_object('print_task_config', None)
 
         self.disable_weight_check = self.afc.disable_weight_check
+        self.enable_lane_mapping_prompt = self.afc.enable_lane_mapping_prompt
 
         # Registering stepper callback so that mux macro can be set properly with valid lane names
         self.printer.register_event_handler("afc_stepper:register_macros",self.register_lane_macros)
@@ -96,6 +109,10 @@ class AFCSpool:
 
         self.gcode.register_command("AFC_RESET_MAPPING", self.cmd_AFC_RESET_MAPPING, desc=self.cmd_AFC_RESET_MAPPING_help)
         self.gcode.register_command("SET_NEXT_SPOOL_ID", self.cmd_SET_NEXT_SPOOL_ID, desc=self.cmd_SET_NEXT_SPOOL_ID_help)
+        if self.afc.snapmaker_printer:
+            self.gcode.register_command("AFC_SNAPMAKER_SELECT_LANE_MAP",
+                                        self.cmd_AFC_SNAPMAKER_SELECT_LANE_MAP,
+                                        desc=self.cmd_AFC_SNAPMAKER_SELECT_LANE_MAP_help)
 
     def register_lane_macros(self, lane_obj: AFCLane) -> None:
         """
@@ -266,19 +283,70 @@ class AFCSpool:
                 "Error when trying to update extruder_map_table for snapmaker print_task_config")
             self.logger.debug(traceback.format_exc())
 
+    def _resolve_new_lane_for_remap(self, cur_lane: AFCLane, screen_extruder_index: int,
+                                    map_cmd: str, unresolved: list[str]
+                                    ) -> Optional[tuple[AFCLane, AFCExtruder]]:
+        """
+        Resolve which lane `map_cmd` should point at for `screen_extruder_index`, or
+        append `map_cmd` to `unresolved` and return None when that can't be determined.
+        The returned lane may be the same lane `map_cmd` already points at.
+
+        :param cur_lane: lane `map_cmd` currently points at
+        :param screen_extruder_index: physical extruder index the screen/slicer has for map_cmd
+        :param map_cmd: T(n) command being resolved
+        :param unresolved: list to append `map_cmd` to when no lane can be determined
+        :return type: (new_lane, target_extruder) once resolved, otherwise None
+        """
+        # Only proves cur_lane's extruder is right, not that it's the specific
+        # lane in use (multiple lanes can share an extruder).
+        index_already_matches = (cur_lane.lane_extruder_index == screen_extruder_index)
+
+        th_extruder_name = ("extruder" if screen_extruder_index == 0
+                            else f"extruder{screen_extruder_index}")
+        target_extruder = self.afc.tools.get(th_extruder_name)
+        if target_extruder is None:
+            if not index_already_matches:
+                unresolved.append(map_cmd)
+            return None
+
+        if target_extruder.is_standalone():
+            # Exactly one lane is hardwired to it, so an index match suffices.
+            if index_already_matches:
+                return None
+            new_lane = target_extruder.tc_lane
+            if (new_lane is None
+                or not (new_lane.prep_state or new_lane.load_state)):
+                unresolved.append(map_cmd)
+                return None
+        else:
+            # Multiple lanes can feed it, so always resolve via whichever
+            # lane is currently loaded instead of trusting the index match.
+            if target_extruder.lane_loaded is None:
+                if not index_already_matches:
+                    unresolved.append(map_cmd)
+                return None
+            new_lane = self.afc.lanes.get(target_extruder.lane_loaded)
+            if new_lane is None:
+                unresolved.append(map_cmd)
+                return None
+
+        return new_lane, target_extruder
+
     def resync_afc_mapping_from_extruder_map_table(self, gcmd: AFCGcmd) -> None:
         """
         Snapmaker-only: at print start, adopts any T(n) remap made from the screen by comparing
-        extruder_map_table against AFC's mapping. An index match alone isn't trusted for a shared
-        extruder: resolves via whichever lane is currently loaded instead. Cancels the print
-        rather than guessing on an unresolvable change set, or one larger than
-        MAX_UNATTENDED_MAPPING_CHANGES.
+        extruder_map_table against AFC's mapping. An index match alone isn't trusted for a
+        shared extruder: resolves via whichever lane is currently loaded instead. Cancels the
+        print on an unresolvable change. On an oversized (`MAX_UNATTENDED_MAPPING_CHANGES`)
+        change set, pauses and asks the user to pick a lane per T(n) when
+        `enable_lane_mapping_prompt` is set, otherwise cancels the print.
 
         :param gcmd: `AFCGcmd` context this was called from, passed through to `run_script`
         """
         warning_msg = ""
         if (not self.afc.snapmaker_printer
-            or self.print_task_config_obj is None):
+            or self.print_task_config_obj is None
+            or self._pending_lane_mapping_prompts):
             return
         try:
             # Snapshot: _set_map below replaces this table via sync_extruder_map_table.
@@ -287,8 +355,10 @@ class AFCSpool:
             print_task_config_2 = getattr(self.print_task_config_obj, 'print_task_config_2', {})
             filament_used_g = print_task_config_2.get('filament_used_g', [])
             filament_used_mm = print_task_config_2.get('filament_used_mm', [])
+            filament_color_rgba = self.print_task_config_obj.print_task_config.get(
+                'filament_color_rgba', [])
 
-            changes: list[tuple[str, AFCLane, AFCLane, int]] = []
+            changes: list[tuple[str, AFCLane, AFCLane, int, AFCExtruder, Optional[str]]] = []
             unresolved: list[str] = []
             # Every used command's resolved target lane, including ones already matching, so
             # two commands wanting the same lane in single-mapping mode can be caught below
@@ -314,45 +384,23 @@ class AFCSpool:
                     continue
 
                 screen_extruder_index = extruder_map_table[logical_index]
-                # Only proves cur_lane's extruder is right, not that it's the specific lane in use,
-                # since multiple lanes can share an extruder.
-                index_already_matches = (cur_lane.lane_extruder_index == screen_extruder_index)
-
-                th_extruder_name = ("extruder" if screen_extruder_index == 0
-                                    else f"extruder{screen_extruder_index}")
-                target_extruder = self.afc.tools.get(th_extruder_name)
-                if target_extruder is None:
-                    if not index_already_matches:
-                        unresolved.append(map_cmd)
+                resolved = self._resolve_new_lane_for_remap(
+                    cur_lane, screen_extruder_index, map_cmd, unresolved)
+                if resolved is None:
                     continue
+                new_lane, target_extruder = resolved
 
-                if target_extruder.is_standalone():
-                    # Exactly one lane is hardwired to it, so an index match suffices.
-                    if index_already_matches:
-                        continue
-                    new_lane = target_extruder.tc_lane
-                    if (new_lane is None
-                        or not (new_lane.prep_state or new_lane.load_state)):
-                        unresolved.append(map_cmd)
-                        continue
-                else:
-                    # Multiple lanes can feed it, so always resolve via whichever
-                    # lane is currently loaded instead of trusting the index match.
-                    if target_extruder.lane_loaded is None:
-                        if not index_already_matches:
-                            unresolved.append(map_cmd)
-                        continue
-                    new_lane = self.afc.lanes.get(target_extruder.lane_loaded)
-                    if new_lane is None:
-                        unresolved.append(map_cmd)
-                        continue
-                    if not self.enable_multiple_mapping:
-                        resolved_targets.setdefault(new_lane, []).append(map_cmd)
+                if (not self.enable_multiple_mapping
+                    and not target_extruder.is_standalone()):
+                    resolved_targets.setdefault(new_lane, []).append(map_cmd)
 
                 if new_lane is cur_lane:
                     continue
 
-                changes.append((map_cmd, cur_lane, new_lane, screen_extruder_index))
+                expected_color = (_format_color_hex(filament_color_rgba[screen_extruder_index])
+                                  if screen_extruder_index < len(filament_color_rgba) else None)
+                changes.append((map_cmd, cur_lane, new_lane, screen_extruder_index,
+                                target_extruder, expected_color))
 
             if not self.enable_multiple_mapping:
                 colliding_cmds = sorted(
@@ -383,17 +431,24 @@ class AFCSpool:
                 return
 
             if len(changes) > MAX_UNATTENDED_MAPPING_CHANGES:
-                warn_str = (
-                    f"{len(changes)} T(n) mappings were changed from the printer's screen "
-                    f"or slicer, more than the {MAX_UNATTENDED_MAPPING_CHANGES} AFC will adopt "
-                    "automatically. Cancelling this print, please restart it from the "
-                    "printer's UI so the new mapping is picked up correctly."
+                warn_prefix = (
+                    f"{len(changes)} T(n) mappings were changed from the printer's screen or "
+                    f"slicer, more than the {MAX_UNATTENDED_MAPPING_CHANGES} AFC will adopt "
+                    "automatically."
                 )
-                self.logger.error(warn_str)
-                self.afc.run_script("CANCEL_PRINT", gcmd=gcmd)
+                if self.enable_lane_mapping_prompt:
+                    self.logger.warning(
+                        f"{warn_prefix} Pausing so T(n) macros can be set to correct lanes.")
+                    self._prompt_for_lane_mapping(changes, gcmd)
+                else:
+                    self.logger.error(
+                        f"{warn_prefix} Cancelling this print, please restart it from the "
+                        "printer's web UI so the new mapping is picked up correctly.")
+                    self.afc.run_script("CANCEL_PRINT", gcmd=gcmd)
                 return
 
-            for map_cmd, cur_lane, new_lane, screen_extruder_index in changes:
+            for (map_cmd, cur_lane, new_lane, screen_extruder_index,
+                _target_extruder, _color) in changes:
                 # An earlier swap may have already moved map_cmd off cur_lane, so re-read its
                 # current owner instead of trusting the pre-batch snapshot.
                 live_owner = self.afc.lanes.get(self.afc.tool_cmds.get(map_cmd))
@@ -414,6 +469,86 @@ class AFCSpool:
             self.logger.error(
                 "Error when trying to resync AFC mapping from snapmaker print_task_config")
             self.logger.debug(traceback.format_exc())
+
+    def _prompt_for_lane_mapping(
+        self, changes: list[tuple[str, AFCLane, AFCLane, int, AFCExtruder, Optional[str]]],
+        gcmd: AFCGcmd
+        ) -> None:
+        """
+        Pause the print and queue a lane-pick dialog per T(n), rather than adopting an
+        oversized change set automatically.
+
+        :param changes: pending (map_cmd, cur_lane, default_lane, extruder_index,
+            target_extruder, expected_color) resolutions from
+            resync_afc_mapping_from_extruder_map_table
+        :param gcmd: `AFCGcmd` context this was called from, passed through to `run_script`
+        """
+        # Dialogs are shown in dict insertion order, so sort by T(n) first to walk
+        # them T0, T1, ..., T10 instead of tool_cmds' arbitrary iteration order.
+        changes = sorted(changes, key=lambda change: natural_sort_key(change[0]))
+        self._pending_lane_mapping_prompts = {}
+        self._pending_lane_mapping_colors = {}
+        for map_cmd, cur_lane, _new_lane, _index, _target_extruder, color in changes:
+            self._pending_lane_mapping_prompts[map_cmd] = cur_lane
+            self._pending_lane_mapping_colors[map_cmd] = color
+        self.afc.run_script("PAUSE", gcmd=gcmd)
+        self._show_next_lane_mapping_prompt(None)
+
+    def _show_next_lane_mapping_prompt(self, gcmd: Optional[GCodeCommand]) -> None:
+        """
+        Show the dialog for one remaining T(n), or close the prompt and resume once
+        all are resolved.
+
+        :param gcmd: command context to show the prompt through, or `None` when called
+            from the print-start resync rather than from a lane-pick button click
+        """
+        if not self._pending_lane_mapping_prompts:
+            AFCprompt(gcmd, self.logger).p_end()
+            self.afc.run_script("AFC_RESUME", gcmd=(gcmd if gcmd is not None else "callback"))
+            return
+
+        map_cmd, cur_lane = next(iter(self._pending_lane_mapping_prompts.items()))
+        expected_color = self._pending_lane_mapping_colors.get(map_cmd)
+        loaded_candidates = []
+        for lane in self.afc.lanes.values():
+            if lane.prep_state and lane.load_state:
+                loaded_candidates.append(lane)
+
+        prompt = AFCprompt(gcmd, self.logger)
+        text = f"{map_cmd} was changed from the printer's screen or slicer. "
+        if expected_color is not None:
+            text += f"It should be loaded with {expected_color} filament. "
+        text += "Select which loaded lane should be used for it."
+
+        buttons = []
+        for index, lane in enumerate(loaded_candidates):
+            label = lane.name
+            if lane.color:
+                label += f" ({_format_color_hex(lane.color)})"
+            command = f"AFC_SNAPMAKER_SELECT_LANE_MAP TOOL={map_cmd} LANE={lane.name}"
+            style = "primary" if index % 2 == 0 else "secondary"
+            buttons.append((label, command, style))
+
+        prompt.create_custom_p(f"Select lane for {map_cmd}", text, buttons, False, None)
+
+    cmd_AFC_SNAPMAKER_SELECT_LANE_MAP_help = "Resolve a lane-mapping prompt from print start"
+    def cmd_AFC_SNAPMAKER_SELECT_LANE_MAP(self, gcmd: GCodeCommand) -> None:
+        """
+        Apply the user's lane pick for one T(n) prompted by _show_next_lane_mapping_prompt,
+        then show the next pending prompt or resume the print once none remain.
+
+        :param gcmd: must include TOOL (the T(n) command) and LANE (chosen lane name)
+        """
+        map_cmd = gcmd.get("TOOL")
+        lane_name = gcmd.get("LANE")
+        cur_lane = self._pending_lane_mapping_prompts.pop(map_cmd, None)
+        self._pending_lane_mapping_colors.pop(map_cmd, None)
+        if cur_lane is None:
+            return
+        new_lane = self.afc.lanes.get(lane_name)
+        if new_lane is not None:
+            self._set_map(new_lane, cur_lane, map_cmd)
+        self._show_next_lane_mapping_prompt(gcmd)
 
     cmd_AFC_SET_SPOOL_TEMP_help = "Set spool temperatures for a lane"
     def cmd_AFC_SET_SPOOL_TEMP(self, gcmd: GCodeCommand) -> None:

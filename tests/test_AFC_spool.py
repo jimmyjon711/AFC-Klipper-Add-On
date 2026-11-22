@@ -15,7 +15,8 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 import pytest
 
-from extras.AFC_spool import AFCSpool, MAX_UNATTENDED_MAPPING_CHANGES, load_config
+from extras.AFC_spool import (AFCSpool, MAX_UNATTENDED_MAPPING_CHANGES, load_config,
+                              _format_color_hex)
 
 
 # ── Module-level import guard ────────────────────────────────────────────────
@@ -55,6 +56,49 @@ class TestNaturalSortKeyImportGuard:
             afc_utils.natural_sort_key = real_natural_sort_key
 
 
+class TestAfcpromptImportGuard:
+    def test_raises_configfile_error_when_import_fails(self):
+        """Covers the module-level try/except around importing AFCprompt from
+        extras.AFC_respond, mirroring TestNaturalSortKeyImportGuard above."""
+        import sys
+        import importlib.util
+        from configfile import error as ConfigFileError
+
+        afc_respond = sys.modules["extras.AFC_respond"]
+        real_afc_prompt = afc_respond.AFCprompt
+        del afc_respond.AFCprompt
+        try:
+            spec = importlib.util.spec_from_file_location(
+                "extras.AFC_spool_import_guard_test_2",
+                sys.modules["extras.AFC_spool"].__file__,
+            )
+            fresh_module = importlib.util.module_from_spec(spec)
+            sys.modules[spec.name] = fresh_module
+            try:
+                with pytest.raises(ConfigFileError):
+                    spec.loader.exec_module(fresh_module)
+            finally:
+                del sys.modules[spec.name]
+        finally:
+            afc_respond.AFCprompt = real_afc_prompt
+
+
+# ── _format_color_hex ─────────────────────────────────────────────────────────
+
+class TestFormatColorHex:
+    def test_strips_leading_hash(self):
+        assert _format_color_hex("#ff0000") == "#FF0000"
+
+    def test_adds_hash_when_missing(self):
+        assert _format_color_hex("ff0000") == "#FF0000"
+
+    def test_truncates_trailing_alpha_byte(self):
+        assert _format_color_hex("ff0000ab") == "#FF0000"
+
+    def test_uppercases_lowercase_hex(self):
+        assert _format_color_hex("abcdef") == "#ABCDEF"
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _make_spool():
@@ -80,6 +124,7 @@ def _make_spool():
     spool.gcode = afc.gcode
     spool.logger = afc.logger
     spool.disable_weight_check = False
+    spool.enable_lane_mapping_prompt = False
     spool.enable_multiple_mapping = afc.enable_multiple_mapping
     spool.function = afc.function
 
@@ -554,6 +599,168 @@ class TestSyncExtruderMapTable:
         ]
 
 
+# ── _resolve_new_lane_for_remap ──────────────────────────────────────────────
+
+class TestResolveNewLaneForRemap:
+    def _make(self):
+        spool = _make_spool()
+        spool.afc.tools = {}
+        return spool
+
+    def test_no_target_extruder_index_already_matches_returns_none(self):
+        spool = self._make()
+        cur_lane = _make_lane("lane1", extruder_index=0)
+        unresolved: list = []
+        result = spool._resolve_new_lane_for_remap(cur_lane, 0, "T0", unresolved)
+        assert result is None
+        assert unresolved == []
+
+    def test_no_target_extruder_index_mismatch_appends_unresolved(self):
+        spool = self._make()
+        cur_lane = _make_lane("lane1", extruder_index=1)
+        unresolved: list = []
+        result = spool._resolve_new_lane_for_remap(cur_lane, 0, "T0", unresolved)
+        assert result is None
+        assert unresolved == ["T0"]
+
+    def test_standalone_index_already_matches_returns_none_without_checking_tc_lane(self):
+        spool = self._make()
+        cur_lane = _make_lane("lane1", extruder_index=0)
+        target_extruder = MagicMock()
+        target_extruder.is_standalone.return_value = True
+        target_extruder.tc_lane = None
+        spool.afc.tools = {"extruder": target_extruder}
+        unresolved: list = []
+        result = spool._resolve_new_lane_for_remap(cur_lane, 0, "T0", unresolved)
+        assert result is None
+        assert unresolved == []
+
+    def test_standalone_no_tc_lane_appends_unresolved(self):
+        spool = self._make()
+        cur_lane = _make_lane("lane1", extruder_index=1)
+        target_extruder = MagicMock()
+        target_extruder.is_standalone.return_value = True
+        target_extruder.tc_lane = None
+        spool.afc.tools = {"extruder": target_extruder}
+        unresolved: list = []
+        result = spool._resolve_new_lane_for_remap(cur_lane, 0, "T0", unresolved)
+        assert result is None
+        assert unresolved == ["T0"]
+
+    def test_standalone_tc_lane_not_prepped_or_loaded_appends_unresolved(self):
+        spool = self._make()
+        cur_lane = _make_lane("lane1", extruder_index=1)
+        tc_lane = _make_lane("tc_lane", extruder_index=0)
+        tc_lane.prep_state = False
+        tc_lane.load_state = False
+        target_extruder = MagicMock()
+        target_extruder.is_standalone.return_value = True
+        target_extruder.tc_lane = tc_lane
+        spool.afc.tools = {"extruder": target_extruder}
+        unresolved: list = []
+        result = spool._resolve_new_lane_for_remap(cur_lane, 0, "T0", unresolved)
+        assert result is None
+        assert unresolved == ["T0"]
+
+    def test_standalone_tc_lane_prepped_resolves(self):
+        spool = self._make()
+        cur_lane = _make_lane("lane1", extruder_index=1)
+        tc_lane = _make_lane("tc_lane", extruder_index=0)
+        tc_lane.prep_state = True
+        tc_lane.load_state = False
+        target_extruder = MagicMock()
+        target_extruder.is_standalone.return_value = True
+        target_extruder.tc_lane = tc_lane
+        spool.afc.tools = {"extruder": target_extruder}
+        unresolved: list = []
+        result = spool._resolve_new_lane_for_remap(cur_lane, 0, "T0", unresolved)
+        assert result == (tc_lane, target_extruder)
+        assert unresolved == []
+
+    def test_standalone_tc_lane_loaded_resolves(self):
+        spool = self._make()
+        cur_lane = _make_lane("lane1", extruder_index=1)
+        tc_lane = _make_lane("tc_lane", extruder_index=0)
+        tc_lane.prep_state = False
+        tc_lane.load_state = True
+        target_extruder = MagicMock()
+        target_extruder.is_standalone.return_value = True
+        target_extruder.tc_lane = tc_lane
+        spool.afc.tools = {"extruder": target_extruder}
+        unresolved: list = []
+        result = spool._resolve_new_lane_for_remap(cur_lane, 0, "T0", unresolved)
+        assert result == (tc_lane, target_extruder)
+        assert unresolved == []
+
+    def test_shared_extruder_nothing_loaded_index_matches_returns_none(self):
+        spool = self._make()
+        cur_lane = _make_lane("lane1", extruder_index=0)
+        target_extruder = MagicMock()
+        target_extruder.is_standalone.return_value = False
+        target_extruder.lane_loaded = None
+        spool.afc.tools = {"extruder": target_extruder}
+        unresolved: list = []
+        result = spool._resolve_new_lane_for_remap(cur_lane, 0, "T0", unresolved)
+        assert result is None
+        assert unresolved == []
+
+    def test_shared_extruder_nothing_loaded_index_mismatch_appends_unresolved(self):
+        spool = self._make()
+        cur_lane = _make_lane("lane1", extruder_index=1)
+        target_extruder = MagicMock()
+        target_extruder.is_standalone.return_value = False
+        target_extruder.lane_loaded = None
+        spool.afc.tools = {"extruder": target_extruder}
+        unresolved: list = []
+        result = spool._resolve_new_lane_for_remap(cur_lane, 0, "T0", unresolved)
+        assert result is None
+        assert unresolved == ["T0"]
+
+    def test_shared_extruder_loaded_lane_not_found_appends_unresolved(self):
+        spool = self._make()
+        cur_lane = _make_lane("lane1", extruder_index=1)
+        target_extruder = MagicMock()
+        target_extruder.is_standalone.return_value = False
+        target_extruder.lane_loaded = "ghost"
+        spool.afc.lanes = {}
+        spool.afc.tools = {"extruder": target_extruder}
+        unresolved: list = []
+        result = spool._resolve_new_lane_for_remap(cur_lane, 0, "T0", unresolved)
+        assert result is None
+        assert unresolved == ["T0"]
+
+    def test_shared_extruder_resolves_via_currently_loaded_lane(self):
+        spool = self._make()
+        cur_lane = _make_lane("lane1", extruder_index=1)
+        new_lane = _make_lane("lane2", extruder_index=0)
+        target_extruder = MagicMock()
+        target_extruder.is_standalone.return_value = False
+        target_extruder.lane_loaded = "lane2"
+        spool.afc.lanes = {"lane2": new_lane}
+        spool.afc.tools = {"extruder": target_extruder}
+        unresolved: list = []
+        result = spool._resolve_new_lane_for_remap(cur_lane, 0, "T0", unresolved)
+        assert result == (new_lane, target_extruder)
+        assert unresolved == []
+
+    def test_resolved_new_lane_same_as_cur_lane_is_still_returned(self):
+        """The caller, not this helper, decides whether a resolved lane matching
+        cur_lane means no change is needed: resync_afc_mapping_from_extruder_map_table
+        still needs this result to record it for single-mapping collision detection
+        before skipping it."""
+        spool = self._make()
+        cur_lane = _make_lane("lane1", extruder_index=1)
+        target_extruder = MagicMock()
+        target_extruder.is_standalone.return_value = False
+        target_extruder.lane_loaded = "lane1"
+        spool.afc.lanes = {"lane1": cur_lane}
+        spool.afc.tools = {"extruder": target_extruder}
+        unresolved: list = []
+        result = spool._resolve_new_lane_for_remap(cur_lane, 0, "T0", unresolved)
+        assert result == (cur_lane, target_extruder)
+        assert unresolved == []
+
+
 # ── resync_afc_mapping_from_extruder_map_table ───────────────────────────────
 
 class TestResyncAfcMappingFromExtruderMapTable:
@@ -583,6 +790,17 @@ class TestResyncAfcMappingFromExtruderMapTable:
         spool.afc.tool_cmds = {"T0": "lane1"}
         spool.resync_afc_mapping_from_extruder_map_table(gcmd="callback")
         spool._set_map.assert_not_called()
+
+    def test_pending_lane_mapping_prompts_blocks_resync(self):
+        """Independent coverage of the `self._pending_lane_mapping_prompts` guard
+        operand: while a lane-pick dialog batch is still pending resolution, a
+        second resync pass must be a no-op rather than racing it."""
+        spool = self._make()
+        spool._pending_lane_mapping_prompts = {"T0": _make_lane("lane1")}
+        spool.afc.tool_cmds = {"T0": "lane1"}
+        spool.resync_afc_mapping_from_extruder_map_table(gcmd="callback")
+        spool._set_map.assert_not_called()
+        spool.afc.run_script.assert_not_called()
 
     def test_skips_non_integer_t_suffix(self):
         spool = self._make()
@@ -1110,6 +1328,56 @@ class TestResyncAfcMappingFromExtruderMapTable:
             "new mapping is picked up correctly."
         )]
 
+    def test_expected_color_set_when_screen_extruder_index_in_range(self):
+        """Independent coverage of the inline `... if screen_extruder_index <
+        len(filament_color_rgba) else None` ternary's truthy side."""
+        spool = self._make()
+        spool.enable_lane_mapping_prompt = True
+        spool._prompt_for_lane_mapping = MagicMock()
+        count = MAX_UNATTENDED_MAPPING_CHANGES + 1
+        self._make_many_changes(spool, count)
+        spool.print_task_config_obj.print_task_config["filament_color_rgba"] = (
+            ["aabbccdd"] * count)
+        spool.resync_afc_mapping_from_extruder_map_table(gcmd="callback")
+        changes = spool._prompt_for_lane_mapping.call_args.args[0]
+        assert all(change[5] == "#AABBCC" for change in changes)
+
+    def test_expected_color_none_when_screen_extruder_index_out_of_range(self):
+        """Independent coverage of the ternary's falsy side: no filament_color_rgba
+        entry exists for this screen_extruder_index."""
+        spool = self._make()
+        spool.enable_lane_mapping_prompt = True
+        spool._prompt_for_lane_mapping = MagicMock()
+        count = MAX_UNATTENDED_MAPPING_CHANGES + 1
+        self._make_many_changes(spool, count)
+        spool.print_task_config_obj.print_task_config["filament_color_rgba"] = []
+        spool.resync_afc_mapping_from_extruder_map_table(gcmd="callback")
+        changes = spool._prompt_for_lane_mapping.call_args.args[0]
+        assert all(change[5] is None for change in changes)
+
+    def test_more_than_max_changes_with_prompt_enabled_pauses_and_prompts(self):
+        """Independent coverage of the `enable_lane_mapping_prompt` branch: with it
+        set, an oversized change set pauses for a per-T(n) lane pick instead of
+        cancelling the print."""
+        spool = self._make()
+        spool.enable_lane_mapping_prompt = True
+        spool._prompt_for_lane_mapping = MagicMock()
+        count = MAX_UNATTENDED_MAPPING_CHANGES + 1
+        self._make_many_changes(spool, count)
+        spool.resync_afc_mapping_from_extruder_map_table(gcmd="callback")
+        spool._set_map.assert_not_called()
+        spool.afc.run_script.assert_not_called()
+        changes = spool._prompt_for_lane_mapping.call_args.args[0]
+        spool._prompt_for_lane_mapping.assert_called_once_with(changes, "callback")
+        changes = spool._prompt_for_lane_mapping.call_args.args[0]
+        assert len(changes) == count
+        assert spool.logger.messages == [(
+            "warning",
+            f"{count} T(n) mappings were changed from the printer's screen or slicer, more than "
+            f"the {MAX_UNATTENDED_MAPPING_CHANGES} AFC will adopt automatically. Pausing so T(n) "
+            "macros can be set to correct lanes."
+        )]
+
     def test_exactly_max_changes_applies_them_instead_of_cancelling(self):
         """count is a literal, independent of MAX_UNATTENDED_MAPPING_CHANGES: the current
         limit is still within the adopt-automatically range, only strictly more than that
@@ -1218,6 +1486,268 @@ class TestResyncAfcMappingFromExtruderMapTable:
 
         spool.afc.run_script.assert_not_called()
         spool._set_map.assert_called_once_with(lane_b, lane_a, "T0")
+
+
+# ── _prompt_for_lane_mapping ──────────────────────────────────────────────────
+
+class TestPromptForLaneMapping:
+    def _make_change(self, map_cmd, cur_lane, color=None):
+        target_extruder = MagicMock()
+        return (map_cmd, cur_lane, cur_lane, 0, target_extruder, color)
+
+    def _make(self):
+        spool = _make_spool()
+        spool.afc.run_script = MagicMock()
+        spool._show_next_lane_mapping_prompt = MagicMock()
+        return spool
+
+    def test_sorts_changes_into_natural_t_n_order(self):
+        spool = self._make()
+        changes = [
+            self._make_change("T10", _make_lane("lane10")),
+            self._make_change("T2", _make_lane("lane2")),
+            self._make_change("T1", _make_lane("lane1")),
+        ]
+        spool._prompt_for_lane_mapping(changes, gcmd="callback")
+        assert list(spool._pending_lane_mapping_prompts.keys()) == ["T1", "T2", "T10"]
+
+    def test_populates_pending_prompts_with_cur_lane(self):
+        spool = self._make()
+        lane1 = _make_lane("lane1")
+        spool._prompt_for_lane_mapping([self._make_change("T0", lane1)], gcmd="callback")
+        assert spool._pending_lane_mapping_prompts == {"T0": lane1}
+
+    def test_populates_pending_colors_with_expected_color(self):
+        spool = self._make()
+        lane1 = _make_lane("lane1")
+        spool._prompt_for_lane_mapping(
+            [self._make_change("T0", lane1, color="#AABBCC")], gcmd="callback")
+        assert spool._pending_lane_mapping_colors == {"T0": "#AABBCC"}
+
+    def test_pauses_print_via_the_passed_gcmd(self):
+        spool = self._make()
+        spool._prompt_for_lane_mapping(
+            [self._make_change("T0", _make_lane("lane1"))], gcmd="force_acquire")
+        spool.afc.run_script.assert_called_once_with("PAUSE", gcmd="force_acquire")
+
+    def test_shows_first_prompt_with_none_gcmd(self):
+        spool = self._make()
+        spool._prompt_for_lane_mapping([self._make_change("T0", _make_lane("lane1"))],
+                                       gcmd="callback")
+        spool._show_next_lane_mapping_prompt.assert_called_once_with(None)
+
+
+# ── _show_next_lane_mapping_prompt ───────────────────────────────────────────
+
+class TestShowNextLaneMappingPrompt:
+    def _make(self):
+        spool = _make_spool()
+        spool.afc.run_script = MagicMock()
+        spool.afc.lanes = {}
+        return spool
+
+    def test_no_pending_prompts_ends_prompt_and_resumes_with_given_gcmd(self):
+        spool = self._make()
+        gcmd = _make_gcmd()
+        with patch("extras.AFC_spool.AFCprompt") as mock_prompt_cls:
+            mock_prompt = mock_prompt_cls.return_value
+            spool._show_next_lane_mapping_prompt(gcmd)
+        mock_prompt_cls.assert_called_once_with(gcmd, spool.logger)
+        mock_prompt.p_end.assert_called_once()
+        spool.afc.run_script.assert_called_once_with("AFC_RESUME", gcmd=gcmd)
+
+    def test_no_pending_prompts_resumes_with_callback_when_gcmd_is_none(self):
+        spool = self._make()
+        with patch("extras.AFC_spool.AFCprompt"):
+            spool._show_next_lane_mapping_prompt(None)
+        spool.afc.run_script.assert_called_once_with("AFC_RESUME", gcmd="callback")
+
+    def test_title_and_text_for_first_pending_map_cmd(self):
+        spool = self._make()
+        spool._pending_lane_mapping_prompts = {"T0": _make_lane("lane1")}
+        spool._pending_lane_mapping_colors = {"T0": None}
+        with patch("extras.AFC_spool.AFCprompt") as mock_prompt_cls:
+            mock_prompt = mock_prompt_cls.return_value
+            spool._show_next_lane_mapping_prompt(None)
+        title, text, _buttons, cancel, groups = mock_prompt.create_custom_p.call_args.args
+        assert title == "Select lane for T0"
+        assert text == (
+            "T0 was changed from the printer's screen or slicer. "
+            "Select which loaded lane should be used for it.")
+        assert cancel is False
+        assert groups is None
+
+    def test_text_includes_expected_color_when_set(self):
+        spool = self._make()
+        spool._pending_lane_mapping_prompts = {"T0": _make_lane("lane1")}
+        spool._pending_lane_mapping_colors = {"T0": "#AABBCC"}
+        with patch("extras.AFC_spool.AFCprompt") as mock_prompt_cls:
+            mock_prompt = mock_prompt_cls.return_value
+            spool._show_next_lane_mapping_prompt(None)
+        text = mock_prompt.create_custom_p.call_args.args[1]
+        assert text == (
+            "T0 was changed from the printer's screen or slicer. "
+            "It should be loaded with #AABBCC filament. "
+            "Select which loaded lane should be used for it.")
+
+    def _show_with_candidate(self, spool, prep_state, load_state):
+        candidate = _make_lane("lane2")
+        candidate.prep_state = prep_state
+        candidate.load_state = load_state
+        spool.afc.lanes = {"lane2": candidate}
+        spool._pending_lane_mapping_prompts = {"T0": _make_lane("lane1")}
+        spool._pending_lane_mapping_colors = {"T0": None}
+        with patch("extras.AFC_spool.AFCprompt") as mock_prompt_cls:
+            mock_prompt = mock_prompt_cls.return_value
+            spool._show_next_lane_mapping_prompt(None)
+        return mock_prompt.create_custom_p.call_args.args[2]
+
+    def test_candidate_excluded_when_only_prepped(self):
+        """Independent coverage of the `load_state` operand of `prep_state and
+        load_state`: prep alone must not be enough to offer a lane."""
+        buttons = self._show_with_candidate(self._make(), prep_state=True, load_state=False)
+        assert buttons == []
+
+    def test_candidate_excluded_when_only_loaded(self):
+        """Independent coverage of the `prep_state` operand: load alone must not
+        be enough to offer a lane."""
+        buttons = self._show_with_candidate(self._make(), prep_state=False, load_state=True)
+        assert buttons == []
+
+    def test_candidate_included_when_prepped_and_loaded(self):
+        buttons = self._show_with_candidate(self._make(), prep_state=True, load_state=True)
+        assert buttons == [
+            ("lane2", "AFC_SNAPMAKER_SELECT_LANE_MAP TOOL=T0 LANE=lane2", "primary")]
+
+    def test_candidates_are_system_wide_not_scoped_to_a_toolhead(self):
+        """All fully-loaded lanes are offered regardless of which extruder
+        they currently feed, since the T(n) being resolved isn't tied to one
+        specific toolhead."""
+        spool = self._make()
+        lane_a = _make_lane("lane_a", extruder_name="extruder", extruder_index=0)
+        lane_a.prep_state = True
+        lane_a.load_state = True
+        lane_b = _make_lane("lane_b", extruder_name="extruder1", extruder_index=1)
+        lane_b.prep_state = True
+        lane_b.load_state = True
+        spool.afc.lanes = {"lane_a": lane_a, "lane_b": lane_b}
+        spool._pending_lane_mapping_prompts = {"T0": _make_lane("lane1")}
+        spool._pending_lane_mapping_colors = {"T0": None}
+        with patch("extras.AFC_spool.AFCprompt") as mock_prompt_cls:
+            mock_prompt = mock_prompt_cls.return_value
+            spool._show_next_lane_mapping_prompt(None)
+        buttons = mock_prompt.create_custom_p.call_args.args[2]
+        assert [button[0] for button in buttons] == ["lane_a", "lane_b"]
+
+    def test_button_label_includes_lane_color_when_set(self):
+        spool = self._make()
+        candidate = _make_lane("lane2")
+        candidate.prep_state = True
+        candidate.load_state = True
+        candidate.color = "#ff0000"
+        spool.afc.lanes = {"lane2": candidate}
+        spool._pending_lane_mapping_prompts = {"T0": _make_lane("lane1")}
+        spool._pending_lane_mapping_colors = {"T0": None}
+        with patch("extras.AFC_spool.AFCprompt") as mock_prompt_cls:
+            mock_prompt = mock_prompt_cls.return_value
+            spool._show_next_lane_mapping_prompt(None)
+        buttons = mock_prompt.create_custom_p.call_args.args[2]
+        assert buttons[0][0] == "lane2 (#FF0000)"
+
+    def test_button_label_omits_color_when_lane_has_none(self):
+        spool = self._make()
+        candidate = _make_lane("lane2")
+        candidate.prep_state = True
+        candidate.load_state = True
+        candidate.color = ""
+        spool.afc.lanes = {"lane2": candidate}
+        spool._pending_lane_mapping_prompts = {"T0": _make_lane("lane1")}
+        spool._pending_lane_mapping_colors = {"T0": None}
+        with patch("extras.AFC_spool.AFCprompt") as mock_prompt_cls:
+            mock_prompt = mock_prompt_cls.return_value
+            spool._show_next_lane_mapping_prompt(None)
+        buttons = mock_prompt.create_custom_p.call_args.args[2]
+        assert buttons[0][0] == "lane2"
+
+    def test_buttons_alternate_primary_and_secondary_style(self):
+        spool = self._make()
+        lanes = {}
+        for i in range(3):
+            lane = _make_lane(f"lane{i}")
+            lane.prep_state = True
+            lane.load_state = True
+            lane.color = ""
+            lanes[lane.name] = lane
+        spool.afc.lanes = lanes
+        spool._pending_lane_mapping_prompts = {"T0": _make_lane("lane1")}
+        spool._pending_lane_mapping_colors = {"T0": None}
+        with patch("extras.AFC_spool.AFCprompt") as mock_prompt_cls:
+            mock_prompt = mock_prompt_cls.return_value
+            spool._show_next_lane_mapping_prompt(None)
+        buttons = mock_prompt.create_custom_p.call_args.args[2]
+        assert [button[2] for button in buttons] == ["primary", "secondary", "primary"]
+
+    def test_button_command_targets_select_lane_map_with_tool_and_lane(self):
+        spool = self._make()
+        candidate = _make_lane("lane2")
+        candidate.prep_state = True
+        candidate.load_state = True
+        candidate.color = ""
+        spool.afc.lanes = {"lane2": candidate}
+        spool._pending_lane_mapping_prompts = {"T3": _make_lane("lane1")}
+        spool._pending_lane_mapping_colors = {"T3": None}
+        with patch("extras.AFC_spool.AFCprompt") as mock_prompt_cls:
+            mock_prompt = mock_prompt_cls.return_value
+            spool._show_next_lane_mapping_prompt(None)
+        buttons = mock_prompt.create_custom_p.call_args.args[2]
+        assert buttons[0][1] == "AFC_SNAPMAKER_SELECT_LANE_MAP TOOL=T3 LANE=lane2"
+
+
+# ── cmd_AFC_SNAPMAKER_SELECT_LANE_MAP ────────────────────────────────────────
+
+class TestCmdAfcSnapmakerSelectLaneMap:
+    def _make(self):
+        spool = _make_spool()
+        spool._set_map = MagicMock()
+        spool._show_next_lane_mapping_prompt = MagicMock()
+        return spool
+
+    def test_valid_pick_applies_map_and_advances_queue(self):
+        spool = self._make()
+        cur_lane = _make_lane("lane1")
+        new_lane = _make_lane("lane2")
+        spool.afc.lanes = {"lane2": new_lane}
+        spool._pending_lane_mapping_prompts = {"T0": cur_lane}
+        spool._pending_lane_mapping_colors = {"T0": "#AABBCC"}
+        gcmd = _make_gcmd(TOOL="T0", LANE="lane2")
+        spool.cmd_AFC_SNAPMAKER_SELECT_LANE_MAP(gcmd)
+        spool._set_map.assert_called_once_with(new_lane, cur_lane, "T0")
+        spool._show_next_lane_mapping_prompt.assert_called_once_with(gcmd)
+        assert spool._pending_lane_mapping_prompts == {}
+        assert spool._pending_lane_mapping_colors == {}
+
+    def test_unknown_map_cmd_returns_without_advancing_queue(self):
+        """If the pending entry for TOOL has already been resolved/removed, this
+        must not touch _set_map or re-show the queue."""
+        spool = self._make()
+        spool._pending_lane_mapping_prompts = {}
+        spool._pending_lane_mapping_colors = {}
+        gcmd = _make_gcmd(TOOL="T5", LANE="lane2")
+        spool.cmd_AFC_SNAPMAKER_SELECT_LANE_MAP(gcmd)
+        spool._set_map.assert_not_called()
+        spool._show_next_lane_mapping_prompt.assert_not_called()
+
+    def test_unknown_lane_skips_set_map_but_still_advances_queue(self):
+        spool = self._make()
+        cur_lane = _make_lane("lane1")
+        spool.afc.lanes = {}
+        spool._pending_lane_mapping_prompts = {"T0": cur_lane}
+        spool._pending_lane_mapping_colors = {"T0": "#AABBCC"}
+        gcmd = _make_gcmd(TOOL="T0", LANE="ghost")
+        spool.cmd_AFC_SNAPMAKER_SELECT_LANE_MAP(gcmd)
+        spool._set_map.assert_not_called()
+        spool._show_next_lane_mapping_prompt.assert_called_once_with(gcmd)
+        assert spool._pending_lane_mapping_prompts == {}
 
 
 # ── cmd_AFC_SWAP_MAPPING ────────────────────────────────────────────────────────
@@ -2391,6 +2921,50 @@ class TestHandleConnect:
         spool.handle_connect()
         assert printer._event_handlers["print_stats:stop"] == [
             spool.snapmaker_sync_cb]
+
+    def test_pulls_enable_lane_mapping_prompt_true_from_afc(self):
+        from tests.conftest import MockAFC, MockConfig, MockPrinter
+        afc = MockAFC()
+        afc.enable_lane_mapping_prompt = True
+        printer = MockPrinter(afc=afc)
+        config = MockConfig(name="AFC_Spool", printer=printer)
+        spool = AFCSpool(config)
+        spool.register_commands(afc)
+        spool.handle_connect()
+        assert spool.enable_lane_mapping_prompt is True
+
+    def test_pulls_enable_lane_mapping_prompt_false_from_afc(self):
+        from tests.conftest import MockAFC, MockConfig, MockPrinter
+        afc = MockAFC()
+        afc.enable_lane_mapping_prompt = False
+        printer = MockPrinter(afc=afc)
+        config = MockConfig(name="AFC_Spool", printer=printer)
+        spool = AFCSpool(config)
+        spool.register_commands(afc)
+        spool.handle_connect()
+        assert spool.enable_lane_mapping_prompt is False
+
+    def test_registers_snapmaker_select_lane_map_when_snapmaker_printer(self):
+        from tests.conftest import MockAFC, MockConfig, MockPrinter
+        afc = MockAFC()
+        afc.snapmaker_printer = True
+        printer = MockPrinter(afc=afc)
+        config = MockConfig(name="AFC_Spool", printer=printer)
+        spool = AFCSpool(config)
+        spool.register_commands(afc)
+        spool.handle_connect()
+        assert "AFC_SNAPMAKER_SELECT_LANE_MAP" in afc.gcode._commands
+
+    def test_does_not_register_snapmaker_select_lane_map_when_not_snapmaker_printer(self):
+        from tests.conftest import MockAFC, MockConfig, MockPrinter
+        afc = MockAFC()
+        afc.snapmaker_printer = False
+        printer = MockPrinter(afc=afc)
+        config = MockConfig(name="AFC_Spool", printer=printer)
+        spool = AFCSpool(config)
+        spool.register_commands(afc)
+        spool.handle_connect()
+        assert "AFC_SNAPMAKER_SELECT_LANE_MAP" not in afc.gcode._commands
 
 
 class TestRegisterLaneMacros:

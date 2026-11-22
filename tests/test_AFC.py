@@ -461,8 +461,20 @@ class TestRunScript:
     `self.gcode.run_script_from_command`, regardless of the gcode mutex's
     state; the literal `"force_acquire"` still goes through
     `self.gcode.run_script` directly even here, since its whole point is to
-    never depend on Kalico's run_script_from_command capability.
+    never depend on Kalico's run_script_from_command capability. The literal
+    `"sub_command"` always borrows via `run_script_from_command` instead,
+    unconditionally, since the caller guarantees the mutex is already held by
+    its own enclosing synchronous gcode context.
     """
+
+    def test_sub_command_always_borrows_regardless_of_mutex_state(self):
+        obj = _make_afc()
+        obj.gcode.get_mutex.return_value.test.return_value = False
+
+        obj.run_script("CANCEL_PRINT", gcmd="sub_command")
+
+        obj.gcode.run_script_from_command.assert_called_once_with("CANCEL_PRINT")
+        obj.gcode.run_script.assert_not_called()
 
     def test_real_gcmd_and_new_kalico_uses_gcmd_run_script(self):
         obj = _make_afc()

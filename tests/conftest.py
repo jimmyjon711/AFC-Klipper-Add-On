@@ -572,6 +572,7 @@ class MockAFC:
         self.prep_done = False
         self.spoolman = None
         self.disable_weight_check = False
+        self.enable_lane_mapping_prompt = False
         self.ignore_spoolman_material_temps = False
         self.auto_spool_switch = False
         self.auto_spool_switch_threshold = 25.0

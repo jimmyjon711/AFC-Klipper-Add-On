@@ -202,6 +202,10 @@ class afc:
         self.disable_weight_check   = config.getboolean("disable_weight_check", False) # Set to True to disable weight check when loading filament into lane/toolhead
         self.disable_ooze_check     = config.getboolean("disable_ooze_check", True) # Disable ooze check for lanes being on the same extruder in M104/M109 commands
         self.disable_print_temp_check = config.getboolean("disable_print_temp_check", False) # Disables print temperature check when swapping lanes while printing
+        # Snapmaker-only: above MAX_UNATTENDED_MAPPING_CHANGES, prompt the user to pick a lane
+        # per T(n) instead of cancelling the print; see AFC_spool's resync_afc_mapping method
+        self.enable_lane_mapping_prompt = config.getboolean(
+            "enable_lane_mapping_prompt", False)
 
         # Auto spool switch settings
         self.auto_spool_switch: bool              = config.getboolean("auto_spool_switch", False)                    # Trigger spool switch based on remaining filament weight
